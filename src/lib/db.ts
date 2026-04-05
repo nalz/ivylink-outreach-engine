@@ -68,7 +68,6 @@ export async function updateProspectStatus(
   status: ProspectStatus,
   extra: Record<string, unknown> = {}
 ): Promise<void> {
-  // Build dynamic SET clause for optional extra fields
   const now = new Date().toISOString();
   await sql`
     UPDATE prospects
@@ -76,13 +75,17 @@ export async function updateProspectStatus(
     WHERE id = ${id}
   `;
 
+  // Apply known extra fields explicitly — no dynamic column names
   if (Object.keys(extra).length > 0) {
-    // Apply extra fields one at a time (safe — values from our own code)
-    for (const [col, val] of Object.entries(extra)) {
-      await sql`
-        UPDATE prospects SET ${sql.unsafe(col)} = ${val as string}, updated_at = ${now}
-        WHERE id = ${id}
-      `;
+    const e = extra as Record<string, unknown>;
+    if (e.score !== undefined) {
+      await sql`UPDATE prospects SET score = ${e.score as number}, updated_at = ${now} WHERE id = ${id}`;
+    }
+    if (e.rejection_reason !== undefined) {
+      await sql`UPDATE prospects SET rejection_reason = ${e.rejection_reason as string}, updated_at = ${now} WHERE id = ${id}`;
+    }
+    if (e.notes !== undefined) {
+      await sql`UPDATE prospects SET notes = ${e.notes as string}, updated_at = ${now} WHERE id = ${id}`;
     }
   }
 }
@@ -120,14 +123,27 @@ export async function markWarmupAction(
   action: 'liked_post' | 'story_reply_sent' | 'post_commented'
 ): Promise<void> {
   const now = new Date().toISOString();
-  const atCol = `${action}_at`;
-  await sql`
-    UPDATE prospects
-    SET ${sql.unsafe(action)} = true,
-        ${sql.unsafe(atCol)} = ${now},
-        updated_at = ${now}
-    WHERE id = ${prospectId}
-  `;
+
+  // Explicit branches — no dynamic column names
+  if (action === 'liked_post') {
+    await sql`
+      UPDATE prospects
+      SET liked_post = true, liked_post_at = ${now}, updated_at = ${now}
+      WHERE id = ${prospectId}
+    `;
+  } else if (action === 'story_reply_sent') {
+    await sql`
+      UPDATE prospects
+      SET story_reply_sent = true, story_reply_at = ${now}, updated_at = ${now}
+      WHERE id = ${prospectId}
+    `;
+  } else if (action === 'post_commented') {
+    await sql`
+      UPDATE prospects
+      SET post_commented = true, post_commented_at = ${now}, updated_at = ${now}
+      WHERE id = ${prospectId}
+    `;
+  }
 
   // Auto-complete warmup when all three done
   await sql`
