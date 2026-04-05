@@ -37,83 +37,94 @@ PHASE 1: SCORING
 Score each category based ONLY on evidence present in the data you received.
 Do NOT invent signals. If a field is empty or absent, score it 0.
 All scores must be integers ≥ 0. Never negative.
+Column maximums are fixed: collab_behavior ≤ 25, local_relevance ≤ 20, content_proof ≤ 20, conversion_intent ≤ 15, engagement_quality ≤ 10, brand_fit ≤ 10. Never exceed these.
 
-TRACK A SCORING (collab-active):
+IMPORTANT: Do not award the maximum tier unless ALL conditions for that tier are met. Partial evidence earns partial points. Maximum points require strong, unambiguous evidence across multiple signals in that category.
 
-Collab Behavior (25 pts max)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+COLLAB BEHAVIOR (25 pts max) — same weight for both tracks
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CRITICAL: A collab for IvyLink means a LOCAL BUSINESS PARTNERSHIP where two businesses cross-refer clients — med spa + gym, + hair salon, + bridal boutique, + yoga studio, + chiropractor, + personal trainer, + restaurant, + boutique.
+CRITICAL: A collab for IvyLink means a LOCAL BUSINESS PARTNERSHIP where two businesses cross-refer clients — med spa + gym, + hair salon, + bridal boutique, + yoga studio, + chiropractor, + personal trainer, + restaurant, + boutique. This is not product promotion.
 
-This is NOT a collab and scores 0: tagging skincare/equipment brands (Plated Skin Science, SkinBetter, Allergan, Hydrafacial, InMode, Galderma, Merz, Revance etc.), posting about products they stock, sponsored brand posts, or national vendor partnerships. These are supplier relationships, not local business collabs IvyLink helps with.
+NOT a collab (score 0 for this category regardless of other signals):
+- Tagging skincare/equipment brands (Plated Skin Science, SkinBetter, Allergan, Hydrafacial, InMode, Galderma, Merz, Revance, etc.)
+- Posting about products they stock or use
+- Tagging team members or employees
+- National vendor or distributor partnerships
 
-- Tagged a LOCAL BUSINESS (gym, salon, studio, boutique, fitness, restaurant) as partner in last 30 days → 25
-- Collab language in caption WITH a local business (not a brand) → 20
-- Local business collab content but older than 30 days → 15
-- Open to collabs language in bio, no evidence yet → 8
-- Only tags product/equipment brands → 0
-- No collab signals → 0
+Track A tiers (evidence of actual local business collabs):
+- Multiple local business partners tagged in last 30 days with clear joint promotion → 25
+- One local business partner tagged in last 30 days → 18
+- Collab language in caption with a local business but no tag → 12
+- Local business collab content older than 30 days → 8
+- Open to collabs language in bio only, no evidence → 4
+- Only tags product brands or team members → 0
 
-Local Relevance (20 pts max)
-- NJ or NYC with city-level location tags in posts → 20
-- NJ or NYC, state/city in bio only → 14
-- Northeast US (CT, PA, MA, Long Island) → 9
-- No geographic signal → 0
+Track B tiers (no collab history expected — score on openness signals only):
+- Explicitly says "open to collabs" or "seeking partnerships" in bio or recent caption → 8
+- Tags occasional local non-product accounts (salon, gym, studio) but no clear collab → 4
+- No signals at all → 0
 
-Content Proof (20 pts max)
-- Before/after Reels + client testimonials + treatment content → 20
-- Before/after OR testimonials (not both) → 13
-- Some client content, inconsistent → 7
-- Stock/generic only → 0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LOCAL RELEVANCE (20 pts max)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Conversion Intent (15 pts max)
-- Active booking link + "book now" or equivalent in bio → 15
-- Booking CTA in captions but no link → 10
-- Passive "DM for info" → 5
+Do NOT award full points for a single signal. Strong local relevance requires multiple signals working together.
+
+- NJ or NYC city-level location tags on 3+ posts AND city name in bio → 20
+- NJ or NYC city-level location tags on 1-2 posts, OR city in bio but not both → 15
+- NJ or NYC mentioned in bio or display name only, no post-level geo → 10
+- Northeast US (Long Island, Westchester, CT, PA, MA) with city signals → 8
+- Northeast US, state level only → 4
+- No geographic signal or ambiguous → 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTENT PROOF (20 pts max)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Do NOT award full points unless you can see explicit evidence of multiple content types in structured_posts.
+
+- Before/after Reels AND client testimonials AND treatment walkthroughs all present → 20
+- Two of the above three types clearly present → 14
+- One type clearly present (e.g. only before/afters, or only treatment content) → 8
+- Generic educational or product content with no clear client proof → 3
+- Stock images, reposts, or no original content → 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONVERSION INTENT (15 pts max)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Booking link alone is not enough for top tier. Strong conversion intent requires active, specific CTAs.
+
+- Active booking link AND specific CTA in bio ("book now", "schedule here", "link below") AND booking language in recent captions → 15
+- Active booking link AND bio CTA, but no caption-level booking language → 10
+- Booking link exists but bio just says "link in bio" with no CTA language → 6
+- Passive CTA only ("DM for info", "call us") with no booking link → 3
 - No conversion signal → 0
 
-Engagement Quality (10 pts max)
-- Real local comments, owner replies visible → 10
-- Good comments, not clearly local → 6
-- Low engagement relative to followers → 2
-- Suspicious engagement → 0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ENGAGEMENT QUALITY (10 pts max)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Brand Fit (10 pts max)
-- Premium positioning, consistent aesthetic, clear voice → 10
-- Decent but inconsistent → 6
-- Discount-heavy or low visual quality → 2
+If you cannot see comment data, default to 4. Do not guess high.
 
-TRACK B SCORING (collab-ready):
+- Real comments from identifiable local people, owner replies visible, engaged community → 10
+- Real comments present, some owner replies, community feels genuine → 7
+- Comments exist but generic or unclear if real locals → 4
+- Low engagement relative to follower count (under 1% engagement rate) → 2
+- No visible engagement or suspicious patterns → 0
 
-Collab Behavior (10 pts max) — reduced weight, they haven't done local collabs yet
-- Mentions being "open to collabs" with local businesses in bio → 10
-- Occasionally tags local non-product businesses (salons, gyms, studios) → 6
-- Only tags product/equipment brands — scores 0, same as no signal → 0
-- No collab signals → 0
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BRAND FIT (10 pts max)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Local Relevance (25 pts max) — increased weight, local strength matters more
-- NJ or NYC with city-level tags in posts AND bio → 25
-- NJ or NYC, one of bio or posts only → 16
-- Northeast US → 10
-- No geographic signal → 0
+- Consistent premium aesthetic across posts, clear brand voice, professional photography → 10
+- Good visual quality but inconsistent tone or mixed content types → 6
+- Generic or educational-heavy content without distinct brand identity → 3
+- Discount-heavy, cluttered, or low visual quality → 1
 
-Content Proof (20 pts max) — same
-- Before/after Reels + client testimonials + treatments → 20
-- Before/after OR testimonials → 13
-- Some client content → 7
-- Stock only → 0
 
-Growth Signal (20 pts max) — replaces Conversion Intent, rewards ambition
-- Active booking + "accepting new clients" / "new location" / "expanding" → 20
-- Active booking link only → 12
-- Passive CTA → 6
-- No signal → 0
-
-Engagement Quality (15 pts max) — increased weight
-- Real local comments, owner replies → 15
-- Good engagement, not clearly local → 9
-- Low engagement → 3
-
-Brand Fit (10 pts max) — same
 
 THRESHOLDS (apply to both tracks):
 - 65-100: status = "ready", priority = "immediate"
@@ -121,8 +132,9 @@ THRESHOLDS (apply to both tracks):
 - 35-49:  status = "scored", priority = "hold"
 - Below 35: status = "rejected"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PHASE 2: COPY GENERATION
+TRACK SCORING NOTE:
+For Track A prospects, a low collab_behavior score (0-8) despite other strong signals means they are misclassified — they look like Track B. Note this in score_reasoning.
+For Track B prospects, collab_behavior will naturally be low (0-8). This is expected. A Track B prospect with strong local relevance (15-20), content proof (14-20), and conversion intent (10-15) is a high quality lead even with 0 collab behavior.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Generate copy for ALL prospects scoring ≥ 35. Rejected prospects get null for all copy.
