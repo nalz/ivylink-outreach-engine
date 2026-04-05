@@ -335,7 +335,7 @@ export async function runScout(pool: Pool): Promise<{
 
   // Insert qualified prospects
   let inserted = 0;
-  const newHandles: string[] = [];
+  const insertedHandlesList: string[] = [];
 
   for (const c of candidates) {
     const { rowCount } = await pool.query(`
@@ -348,7 +348,7 @@ export async function runScout(pool: Pool): Promise<{
 
     if (rowCount && rowCount > 0) {
       inserted++;
-      newHandles.push(c.handle);
+      insertedHandlesList.push(c.handle);
 
       await pool.query(`
         INSERT INTO activity_log (source, action, detail)
@@ -360,10 +360,9 @@ export async function runScout(pool: Pool): Promise<{
   }
 
   // Update memory
-  const insertedHandles = candidates.filter((_, i) => i < inserted).map((c) => c.handle);
   const updatedHandles = [
     ...(memory.discovered_handles as string[]),
-    ...insertedHandles,
+    ...insertedHandlesList,
   ];
 
   await pool.query(`
