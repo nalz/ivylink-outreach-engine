@@ -44,13 +44,46 @@ const PERMANENT_EXCLUSIONS = new Set([
 
 // ── Hashtag groups (run in parallel) ─────────────────────────────────────────
 
+// Geo + treatment combos = almost always actual providers posting their own work.
+// Business/marketing hashtags (#medspabusiness, #medspamarketing) are dropped —
+// they attract vendors and consultants who sell TO med spas, not owners.
 const HASHTAG_GROUPS = [
-  ['#medspaowner','#medspabusiness','#mymedspa','#aestheticpractice','#medspaceo','#aestheticsbusiness'],
-  ['#njmedspa','#newjerseymedspa','#nycmedspa','#manhattanmedspa','#longislandmedspa','#brooklynmedspa','#hobokenmedspa','#jerseycitymedspa'],
-  ['#npaesthetics','#rninjector','#nursepractitioneraesthetics','#paesthetics','#nurseinjectornj','#medspagrowth','#medspamarketing'],
+  // NJ city-level — highest signal, almost exclusively local providers
+  ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
+   '#princetonmedspa','#morristownmedspa','#newjerseymedspa','#njmedspa','#njbotox','#njfiller'],
+  // NYC borough + suburb geo
+  ['#nycmedspa','#manhattanmedspa','#brooklynmedspa','#longislandmedspa',
+   '#westchestermedspa','#nycbotox','#nycfiller','#nycaesthetics','#njaesthetics'],
+  // Geo + treatment combos
+  ['#njhydrafacial','#njmicroneedling','#njlaser','#nychydrafacial',
+   '#nycmicroneedling','#nycskincare','#njskincare','#njinjector','#nycinjector'],
 ];
 
-// ── Owner qualification ───────────────────────────────────────────────────────
+// ── Geographic filter ─────────────────────────────────────────────────────────
+
+const GEO_REJECT = [
+  'essex','london','manchester','birmingham','glasgow','edinburgh',
+  ' uk','united kingdom','england','scotland','wales',
+  'australia','canada','dubai','singapore','nigeria',
+  'los angeles',' miami','chicago','dallas','houston','phoenix',
+  'seattle','denver','atlanta','las vegas',
+];
+
+const GEO_ACCEPT = [
+  'new jersey',' nj','new york',' nyc',' ny ',
+  'hoboken','jersey city','montclair','summit','princeton',
+  'morristown','westfield','ridgewood','short hills',
+  'manhattan','brooklyn','queens','bronx','staten island',
+  'long island','westchester','nassau','suffolk',
+];
+
+function isGeoMatch(bio: string, localSignals: string[]): boolean {
+  const text = `${bio} ${localSignals.join(' ')}`.toLowerCase();
+  if (GEO_REJECT.some(s => text.includes(s))) return false;
+  // Positive match not required — let Claude handle borderline cases in scoring
+  return true;
+}
+
 
 const OWNER_SIGNALS = [
   'owner','founder','co-founder','cofounder','ceo',
@@ -79,8 +112,19 @@ function isOwner(account: {
 }): { qualified: boolean; reason: string } {
   if (account.isPrivate) return { qualified: false, reason: 'private' };
   if (PERMANENT_EXCLUSIONS.has(account.username)) return { qualified: false, reason: 'exclusion list' };
-  if (account.followersCount < 200 || account.followersCount > 150_000) {
+  if (account.followersCount < 400 || account.followersCount > 150_000) {
     return { qualified: false, reason: `followers ${account.followersCount}` };
+  }
+
+  // Reject vendor/agency/software bios regardless of other signals
+  const vendorSignals = [
+    'agency', 'software', 'saas', 'platform', 'app for', 'tool for',
+    'we help med spa', 'we help medspa', 'helping med spa', 'for med spas',
+    'marketing for', 'grow your', 'scale your', 'ai for',
+    'academy', 'course', 'coaching', 'consultant', 'distributor', 'supplier',
+  ];
+  if (vendorSignals.some(v => bio.includes(v))) {
+    return { qualified: false, reason: 'vendor/agency bio signal' };
   }
 
   const bio = (account.biography ?? '').toLowerCase();
@@ -93,6 +137,11 @@ function isOwner(account: {
 
   const hasIcp = ICP_KEYWORDS.some(kw => bio.includes(kw) || name.includes(kw));
   if (!hasIcp) return { qualified: false, reason: 'no ICP keyword' };
+
+  // Geographic filter — reject non NJ/NYC accounts
+  if (!isGeoMatch(account.biography, [])) {
+    return { qualified: false, reason: 'non NJ/NYC geography' };
+  }
 
   for (const pattern of EMPLOYEE_PATTERNS) {
     if (pattern.test(account.biography ?? '')) {
