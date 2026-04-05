@@ -181,6 +181,17 @@ export async function runAnalyst(pool: Pool): Promise<{
         ? result.enrichment.posting_frequency
         : 'sporadic';
 
+      // Clamp all score values to their DB check constraint ranges
+      const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(v ?? 0)));
+      const sb = result.score_breakdown;
+      const safeScore = clamp(result.score, 0, 100);
+      const safeCollab   = clamp(sb.collab_behavior,    0, 25);
+      const safeLocal    = clamp(sb.local_relevance,    0, 20);
+      const safeContent  = clamp(sb.content_proof,      0, 20);
+      const safeConvert  = clamp(sb.conversion_intent,  0, 15);
+      const safeEngage   = clamp(sb.engagement_quality, 0, 10);
+      const safeBrand    = clamp(sb.brand_fit,          0, 10);
+
       // Persist score and enrichment
       await pool.query(`
         UPDATE prospects SET
@@ -208,13 +219,13 @@ export async function runAnalyst(pool: Pool): Promise<{
         WHERE id = $21
       `, [
         result.status,
-        result.score,
-        result.score_breakdown.collab_behavior,
-        result.score_breakdown.local_relevance,
-        result.score_breakdown.content_proof,
-        result.score_breakdown.conversion_intent,
-        result.score_breakdown.engagement_quality,
-        result.score_breakdown.brand_fit,
+        safeScore,
+        safeCollab,
+        safeLocal,
+        safeContent,
+        safeConvert,
+        safeEngage,
+        safeBrand,
         result.score_reasoning,
         JSON.stringify(result.red_flags),
         validActivityLevel,

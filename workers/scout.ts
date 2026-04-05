@@ -7,6 +7,19 @@
 
 import { Pool } from 'pg';
 
+// Strip lone Unicode surrogate pairs that break PostgreSQL JSON columns.
+// Instagram captions contain emoji encoded as surrogate pairs (\uD800-\uDFFF)
+// which are valid in JS strings but invalid in JSON (Postgres rejects them).
+function sanitizeForJson(str: string): string {
+  if (!str) return str;
+  // Replace lone surrogates with the replacement character
+  return str.replace(/[\uD800-\uDFFF]/g, '\uFFFD');
+}
+
+function sanitizeArray(arr: string[]): string[] {
+  return arr.map(sanitizeForJson);
+}
+
 const APIFY_TOKEN = process.env.APIFY_TOKEN!;
 // Correct format: creator~actor-name (tilde, not slash)
 const APIFY_ACTOR_ID = 'apify~instagram-scraper';
@@ -326,17 +339,17 @@ async function getProfilesForHandles(handles: string[]): Promise<Array<{
 
     return {
       username: p.username ?? '',
-      fullName: p.fullName ?? '',
-      biography: p.biography ?? '',
+      fullName: sanitizeForJson(p.fullName ?? ''),
+      biography: sanitizeForJson(p.biography ?? ''),
       followersCount: p.followersCount ?? 0,
       followsCount: p.followsCount ?? 0,
       postsCount: p.postsCount ?? 0,
       isPrivate: p.isPrivate ?? false,
       hasBookingLink,
-      recentCaptions,
-      collabSignals,
-      localSignals,
-      contentThemes,
+      recentCaptions: sanitizeArray(recentCaptions),
+      collabSignals: sanitizeArray(collabSignals),
+      localSignals: sanitizeArray(localSignals),
+      contentThemes: sanitizeArray(contentThemes),
       usesStories: (p.highlightReelCount ?? 0) > 0,
     };
   }).filter((p) => p.username !== '');
@@ -551,13 +564,16 @@ export async function runScout(pool: Pool): Promise<{
       VALUES ($1,$2,$3,$4,$5,$6,'hashtag',$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)
       ON CONFLICT (handle) DO NOTHING
     `, [
-      c.handle, c.name, c.bio, c.follower_count, c.following_count, c.post_count,
+      c.handle,
+      sanitizeForJson(c.name),
+      sanitizeForJson(c.bio),
+      c.follower_count, c.following_count, c.post_count,
       isSeedStrategy ? SEED_ACCOUNTS.join(', ') : hashtags.join(', '),
       c.has_booking_link, c.uses_stories,
-      JSON.stringify(c.recent_captions),
-      JSON.stringify(c.collab_signals),
-      JSON.stringify(c.local_signals),
-      JSON.stringify(c.content_themes),
+      JSON.stringify(sanitizeArray(c.recent_captions)),
+      JSON.stringify(sanitizeArray(c.collab_signals)),
+      JSON.stringify(sanitizeArray(c.local_signals)),
+      JSON.stringify(sanitizeArray(c.content_themes)),
     ]);
 
     if (rowCount && rowCount > 0) {
