@@ -25,8 +25,9 @@ Apply each category strictly using the values below. Do not round up. Partial cr
 COLLAB BEHAVIOR (25 pts max)
 - Tagged a local business partner in last 30 days → 25
 - Has collab content but older than 30 days → 15
-- Mentions collabs in bio only → 8
-- No collab signals → 0
+- Mentions collabs in bio only → 10
+- No collab signals but strong local presence → 5
+- No collab signals at all → 0
 
 LOCAL RELEVANCE (20 pts max)
 - NJ-based with city-level location tags → 20
@@ -58,10 +59,10 @@ BRAND FIT (10 pts max)
 - Discount-heavy or low-quality visual presentation → 2
 
 SCORE THRESHOLDS:
-- 80-100: status = "ready", priority = "immediate"
-- 70-79: status = "ready", priority = "queue"
-- 50-69: status = "scored", priority = "hold"
-- Below 50: status = "rejected"
+- 60-100: status = "ready", priority = "immediate"
+- 45-59:  status = "ready", priority = "queue"
+- 30-44:  status = "scored", priority = "hold"
+- Below 30: status = "rejected"
 
 RED FLAGS (auto-reject if any present):
 - Engagement looks fake (emoji-only comments, suspicious round numbers)
@@ -76,7 +77,7 @@ RED FLAGS (auto-reject if any present):
 PHASE 2: COPY GENERATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Only generate copy for prospects scoring >= 70.
+Only generate copy for prospects scoring >= 45.
 For rejected/hold prospects, return null for all copy fields.
 
 THE NALIN VOICE — read this carefully:

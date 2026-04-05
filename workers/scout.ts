@@ -12,8 +12,10 @@ const APIFY_TOKEN = process.env.APIFY_TOKEN!;
 const APIFY_ACTOR_ID = 'apify~instagram-scraper';
 const APIFY_BASE = 'https://api.apify.com/v2';
 
-// Max 2 prospects per scout run (human behavior mirroring)
-const MAX_PROSPECTS_PER_RUN = 2;
+// Max prospects to add per scout run — keeping it low to mimic human pacing
+const MAX_PROSPECTS_PER_RUN = 5;
+// Max handles to fetch full profiles for in Phase 2
+const MAX_PROFILE_LOOKUPS = 25;
 const DAILY_DISCOVERY_LIMIT = 30;
 const MIN_GAP_MINUTES = 25;
 
@@ -43,16 +45,27 @@ function isQualifiedProspect(account: {
   followersCount: number;
   followsCount: number;
   isPrivate: boolean;
-  latestIgtvVideoUrl?: string;
   postsCount: number;
 }): boolean {
   if (account.isPrivate) return false;
-  if (account.followersCount < 200 || account.followersCount > 50_000) return false;
+
+  // Wider follower range — some owner accounts are smaller or larger
+  if (account.followersCount < 100 || account.followersCount > 100_000) return false;
 
   const bio = (account.biography ?? '').toLowerCase();
+
+  // Expanded keyword list — catches alternate spellings and adjacent niches
   const icpKeywords = [
-    'med spa', 'medspa', 'medical spa', 'aesthetics', 'injectables',
-    'botox', 'skincare', 'wellness', 'body contouring', 'hydrafacial',
+    'med spa', 'medspa', 'medical spa',
+    'aesthetics', 'esthetics', 'aesthetic',
+    'injectables', 'injector', 'botox', 'filler',
+    'skincare', 'skin care', 'facial',
+    'wellness', 'body contouring',
+    'hydrafacial', 'microneedling', 'laser',
+    'anti-aging', 'anti aging',
+    'lash', 'brow', 'waxing',                 // adjacent beauty services
+    'iv therapy', 'iv drip', 'hormone',        // wellness/med adjacent
+    'clinic', 'spa owner', 'beauty studio',
   ];
 
   const hasIcpBio = icpKeywords.some((kw) => bio.includes(kw));
@@ -271,7 +284,7 @@ export async function runScout(pool: Pool): Promise<{
   }
 
   // Filter out already-known handles before doing profile lookups
-  const newHandles = rawHandles.filter((h) => !knownHandles.has(h)).slice(0, 10);
+  const newHandles = rawHandles.filter((h) => !knownHandles.has(h)).slice(0, MAX_PROFILE_LOOKUPS);
 
   if (newHandles.length === 0) {
     console.log('[scout] All handles already known, nothing to enrich');
