@@ -21,18 +21,23 @@ const MIN_GAP_MINUTES = 25;
 
 // ── Discovery strategies ───────────────────────────────────────────────────────
 
-// Seed accounts: known NJ med spas whose followers/following lists
-// contain other med spa owners. Much higher signal than hashtags.
+// Seed accounts: well-known NJ med spa OWNERS (not practitioners).
+// We scrape who these owners collab with and tag — other owners.
+// Rotate through seeds so we don't pull from the same network twice.
 const SEED_ACCOUNTS = [
-  'hlmedspa.official',
-  'time2dripmedspa',
-  'thegardenmedspanj',
-  'luminarymedspa',
-  'glowbarmedspa',
-  'njskinclinic',
-  'aestheticsbydesignnj',
-  'njlasercenter',
+  'hlmedspa.official',       // HL Med Spa NJ
+  'luminarymedspa',          // Luminary Med Spa NJ
+  'glowbarmedspa',           // Glow Bar NJ
+  'njlasercenter',           // NJ Laser Center
+  'aestheticsbydesignnj',    // Aesthetics by Design NJ
+  'beautybynaturemedspanj',  // Beauty by Nature NJ
+  'skinlabnj',               // Skin Lab NJ
+  'elitemedspanj',           // Elite Med Spa NJ
 ] as const;
+
+// Max handles to pull from any single seed account
+// Prevents 5 results all from thegardenmedspanj
+const MAX_PER_SEED = 3;
 
 // Hashtag strategies as fallback — lower signal, cast wider net
 const HASHTAG_STRATEGIES = [
@@ -63,13 +68,11 @@ function isQualifiedProspect(account: {
   postsCount: number;
 }): boolean {
   if (account.isPrivate) return false;
-
-  // Wider follower range — some owner accounts are smaller or larger
-  if (account.followersCount < 100 || account.followersCount > 100_000) return false;
+  if (account.followersCount < 200 || account.followersCount > 100_000) return false;
 
   const bio = (account.biography ?? '').toLowerCase();
 
-  // Expanded keyword list — catches alternate spellings and adjacent niches
+  // Must have med spa / aesthetics ICP signal
   const icpKeywords = [
     'med spa', 'medspa', 'medical spa',
     'aesthetics', 'esthetics', 'aesthetic',
@@ -78,13 +81,42 @@ function isQualifiedProspect(account: {
     'wellness', 'body contouring',
     'hydrafacial', 'microneedling', 'laser',
     'anti-aging', 'anti aging',
-    'lash', 'brow', 'waxing',                 // adjacent beauty services
-    'iv therapy', 'iv drip', 'hormone',        // wellness/med adjacent
-    'clinic', 'spa owner', 'beauty studio',
+    'iv therapy', 'iv drip', 'hormone',
+    'clinic', 'beauty studio',
   ];
-
   const hasIcpBio = icpKeywords.some((kw) => bio.includes(kw));
   if (!hasIcpBio) return false;
+
+  // Must show ownership signals — exclude employees/practitioners at someone else's spa
+  const ownerSignals = [
+    'owner', 'founder', 'co-founder', 'cofounder',
+    'ceo', 'director', 'practice owner',
+    'my spa', 'my clinic', 'my studio', 'my practice',
+    'opened', 'founded', 'established',
+    'book with me', 'book me', 'see me at',
+    'pa-c', 'np ', 'nurse practitioner', 'physician',  // licensed injectors often own
+    'rn ', 'aprn', 'fnp', 'dnp',
+  ];
+  const employeeSignals = [
+    // Strong signals that this person works FOR a spa, not owns one
+    // e.g. "@someplace medical aesthetician" or "esthetician @someplace"
+  ];
+
+  const hasOwnerSignal = ownerSignals.some((kw) => bio.includes(kw));
+
+  // Exclude if bio is clearly "I work at [tagged account]" with no ownership language
+  // Pattern: bio contains @ mention AND has employee title but NO owner signal
+  const hasEmployeePattern = (
+    bio.includes('@') &&
+    (bio.includes('aesthetician @') || bio.includes('esthetician @') ||
+     bio.includes('injector @') || bio.includes('provider @') ||
+     bio.includes('specialist @') || bio.includes('expert @')) &&
+    !hasOwnerSignal
+  );
+  if (hasEmployeePattern) return false;
+
+  // Require follower count > 400 for non-owners (filters out individual practitioners)
+  if (!hasOwnerSignal && account.followersCount < 400) return false;
 
   return true;
 }
@@ -119,9 +151,10 @@ async function getHandlesFromSeedAccounts(seeds: readonly string[]): Promise<str
   const runData = await runRes.json() as { data: { id: string } };
   const items = await pollApifyRun(runData.data.id, 90);
 
-  // Extract latestPosts authors and tagged users from seed profiles
-  // as proxies for their network — accounts that interact with known med spas
+  // Extract tagged/collab accounts from seed posts, capped per seed
   const handles = new Set<string>();
+  const perSeedCount = new Map<string, number>();
+
   for (const item of items) {
     const profile = item as {
       username?: string;
@@ -132,13 +165,21 @@ async function getHandlesFromSeedAccounts(seeds: readonly string[]): Promise<str
       }>;
     };
 
-    // Accounts tagged in the seed's posts are strong ICP signals
+    const seedHandle = profile.username ?? 'unknown';
+    const seedCount = perSeedCount.get(seedHandle) ?? 0;
+
     for (const post of profile.latestPosts ?? []) {
       for (const tagged of post.taggedUsers ?? []) {
-        if (tagged.username) handles.add(tagged.username);
+        if (tagged.username && seedCount < MAX_PER_SEED) {
+          handles.add(tagged.username);
+          perSeedCount.set(seedHandle, (perSeedCount.get(seedHandle) ?? 0) + 1);
+        }
       }
       for (const coauthor of post.coauthorProducers ?? []) {
-        if (coauthor.username) handles.add(coauthor.username);
+        if (coauthor.username && seedCount < MAX_PER_SEED) {
+          handles.add(coauthor.username);
+          perSeedCount.set(seedHandle, (perSeedCount.get(seedHandle) ?? 0) + 1);
+        }
       }
     }
   }
