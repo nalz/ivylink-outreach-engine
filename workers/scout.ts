@@ -77,10 +77,9 @@ const GEO_ACCEPT = [
   'long island','westchester','nassau','suffolk',
 ];
 
-function isGeoMatch(bio: string, localSignals: string[]): boolean {
-  const text = `${bio} ${localSignals.join(' ')}`.toLowerCase();
+function isGeoMatch(bio: string | null | undefined, localSignals: string[]): boolean {
+  const text = `${bio ?? ''} ${(localSignals ?? []).join(' ')}`.toLowerCase();
   if (GEO_REJECT.some(s => text.includes(s))) return false;
-  // Positive match not required — let Claude handle borderline cases in scoring
   return true;
 }
 
@@ -116,7 +115,15 @@ function isOwner(account: {
     return { qualified: false, reason: `followers ${account.followersCount}` };
   }
 
-  // Reject vendor/agency/software bios regardless of other signals
+  const bio = (account.biography ?? '').toLowerCase();
+  const name = (account.displayName ?? '').toLowerCase();
+
+  const badCategories = ['esthetician','makeup artist','hair salon','nail salon','tattoo'];
+  if (account.category && badCategories.some(c => account.category!.toLowerCase().includes(c))) {
+    return { qualified: false, reason: `category: ${account.category}` };
+  }
+
+  // Reject vendor/agency/software bios
   const vendorSignals = [
     'agency', 'software', 'saas', 'platform', 'app for', 'tool for',
     'we help med spa', 'we help medspa', 'helping med spa', 'for med spas',
@@ -127,18 +134,9 @@ function isOwner(account: {
     return { qualified: false, reason: 'vendor/agency bio signal' };
   }
 
-  const bio = (account.biography ?? '').toLowerCase();
-  const name = (account.displayName ?? '').toLowerCase();
-
-  const badCategories = ['esthetician','makeup artist','hair salon','nail salon','tattoo'];
-  if (account.category && badCategories.some(c => account.category!.toLowerCase().includes(c))) {
-    return { qualified: false, reason: `category: ${account.category}` };
-  }
-
   const hasIcp = ICP_KEYWORDS.some(kw => bio.includes(kw) || name.includes(kw));
   if (!hasIcp) return { qualified: false, reason: 'no ICP keyword' };
 
-  // Geographic filter — reject non NJ/NYC accounts
   if (!isGeoMatch(account.biography, [])) {
     return { qualified: false, reason: 'non NJ/NYC geography' };
   }
