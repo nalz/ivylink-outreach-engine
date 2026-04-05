@@ -24,6 +24,7 @@ const MAX_PROSPECTS_PER_RUN = 5; // Keep Claude costs predictable
 
 interface AnalystResult {
   prospect_id: string;
+  collab_track: 'A' | 'B';
   status: 'ready' | 'scored' | 'rejected';
   priority: 'immediate' | 'queue' | 'hold' | null;
   score: number;
@@ -111,7 +112,7 @@ export async function runAnalyst(pool: Pool): Promise<{
 }> {
   const stats = { enriched: 0, scored: 0, dmsGenerated: 0, rejected: 0, errors: 0 };
 
-  // Fetch prospects needing processing (discovered or enriched)
+  // Fetch prospects needing processing
   const { rows: prospects } = await pool.query<{
     id: string;
     handle: string;
@@ -129,11 +130,12 @@ export async function runAnalyst(pool: Pool): Promise<{
     collab_signals: string[];
     local_signals: string[];
     content_themes: string[];
+    notes: string | null;
   }>(`
     SELECT id, handle, name, bio, follower_count, following_count,
            post_count, discovered_via, source_detail, status,
            has_booking_link, uses_stories,
-           recent_captions, collab_signals, local_signals, content_themes
+           recent_captions, collab_signals, local_signals, content_themes, notes
     FROM prospects
     WHERE status IN ('discovered', 'enriched')
     ORDER BY discovered_at ASC
@@ -149,6 +151,19 @@ export async function runAnalyst(pool: Pool): Promise<{
 
   for (const p of prospects) {
     try {
+      // Parse track + structured posts from notes field
+      let track: 'A' | 'B' = 'B';
+      let structuredPosts: ProspectProfileInput['structured_posts'] = [];
+      if (p.notes) {
+        try {
+          const notes = JSON.parse(p.notes) as { track?: string; structured_posts?: unknown[] };
+          track = notes.track === 'A' ? 'A' : 'B';
+          structuredPosts = (notes.structured_posts ?? []) as ProspectProfileInput['structured_posts'];
+        } catch {
+          // notes not JSON — default to Track B
+        }
+      }
+
       const profile: ProspectProfileInput = {
         prospect_id: p.id,
         handle: p.handle,
@@ -159,17 +174,14 @@ export async function runAnalyst(pool: Pool): Promise<{
         post_count: p.post_count,
         discovered_via: p.discovered_via,
         source_detail: p.source_detail,
-        link_in_bio: p.has_booking_link ? 'booking link detected' : null,
-        // Pass Apify-captured post signals so Claude can score accurately
-        recent_posts: (p.recent_captions ?? []).map((caption, i) => ({
-          caption_summary: caption,
-          post_type: 'photo' as const,
-          tagged_accounts: i === 0 ? (p.collab_signals ?? []) : [],
-          location_tag: (p.local_signals ?? [])[i] ?? undefined,
-        })),
-        story_highlights: p.uses_stories ? ['highlights detected'] : [],
-        recent_collab_posts: p.collab_signals ?? [],
-        location_from_bio: (p.local_signals ?? [])[0] ?? undefined,
+        collab_track: track,
+        has_booking_link: p.has_booking_link,
+        uses_stories: p.uses_stories,
+        structured_posts: structuredPosts,
+        recent_captions: p.recent_captions ?? [],
+        collab_signals: p.collab_signals ?? [],
+        local_signals: p.local_signals ?? [],
+        content_themes: p.content_themes ?? [],
       };
 
       const result = await analyzeProspect(profile);
@@ -302,7 +314,7 @@ export async function runAnalyst(pool: Pool): Promise<{
         JSON.stringify({ score: result.score, priority: result.priority }),
       ]);
 
-      console.log(`[analyst] @${p.handle} → ${result.score} pts (${result.status})`);
+      console.log(`[analyst] @${p.handle} → ${result.score} pts (${result.status}) Track ${result.collab_track ?? track}`);
 
       // Polite delay between Claude calls
       await sleep(1500);
