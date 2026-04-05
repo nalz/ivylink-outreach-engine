@@ -18,7 +18,7 @@ const client = new Anthropic({
 });
 
 const MODEL = 'claude-sonnet-4-5';
-const MAX_PROSPECTS_PER_RUN = 5; // Keep Claude costs predictable
+const MAX_PROSPECTS_PER_RUN = 15; // Process a full scout batch in one run
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -258,6 +258,8 @@ export async function runAnalyst(pool: Pool): Promise<{
 
       // Persist content if generated
       if (result.status !== 'rejected' && result.content.dm_variant_1) {
+        // Truncate style codes — schema expects short strings, Claude returns e.g. "A3", "B2"
+        const s = (v: string | null) => v ? v.slice(0, 10) : null;
         await pool.query(`
           INSERT INTO prospect_content (
             prospect_id,
@@ -285,15 +287,15 @@ export async function runAnalyst(pool: Pool): Promise<{
         `, [
           p.id,
           result.content.dm_variant_1,
-          result.content.dm_variant_1_style,
+          s(result.content.dm_variant_1_style),
           result.content.dm_variant_2,
-          result.content.dm_variant_2_style,
+          s(result.content.dm_variant_2_style),
           result.content.dm_variant_3,
-          result.content.dm_variant_3_style,
+          s(result.content.dm_variant_3_style),
           result.content.story_reply,
           result.content.post_comment,
           result.content.follow_up_dm,
-          result.content.follow_up_style,
+          s(result.content.follow_up_style),
           MODEL,
           result.content.generation_notes,
         ]);
