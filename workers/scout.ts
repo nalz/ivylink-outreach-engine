@@ -61,15 +61,13 @@ function isQualifiedProspect(account: {
   return true;
 }
 
-// ── Apify run + result fetch ──────────────────────────────────────────────────
+// ── Apify: Step 1 — extract unique handles from hashtag posts ─────────────────
 
-async function runApifyHashtagScraper(hashtags: string[]): Promise<unknown[]> {
-  // Build hashtag URLs — apify~instagram-scraper accepts directUrls
+async function getHandlesFromHashtags(hashtags: string[]): Promise<string[]> {
   const directUrls = hashtags.map(
     (h) => `https://www.instagram.com/explore/tags/${h.replace('#', '')}/`
   );
 
-  // Start the actor run
   const runRes = await fetch(
     `${APIFY_BASE}/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_TOKEN}`,
     {
@@ -77,23 +75,95 @@ async function runApifyHashtagScraper(hashtags: string[]): Promise<unknown[]> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         directUrls,
-        resultsType: 'posts',   // posts | details | comments | stories
-        resultsLimit: 20,       // per URL — we filter down to 2 qualified
-        addParentData: true,    // includes owner profile fields on each post
+        resultsType: 'posts',
+        resultsLimit: 30, // cast wide — we'll filter after profile lookup
       }),
     }
   );
 
   if (!runRes.ok) {
     const text = await runRes.text();
-    throw new Error(`Apify start failed: ${runRes.status} ${text}`);
+    throw new Error(`Apify hashtag run failed: ${runRes.status} ${text}`);
   }
 
   const runData = await runRes.json() as { data: { id: string } };
-  const runId = runData.data.id;
+  const items = await pollApifyRun(runData.data.id, 90);
 
-  // Poll for completion (max 90s — hashtag scrapes can be slow)
-  for (let i = 0; i < 18; i++) {
+  // Extract unique owner handles from post items
+  const handles = new Set<string>();
+  for (const item of items) {
+    const post = item as { ownerUsername?: string };
+    if (post.ownerUsername) handles.add(post.ownerUsername);
+  }
+
+  console.log(`[scout] Step 1: found ${handles.size} unique handles from ${items.length} posts`);
+  return [...handles];
+}
+
+// ── Apify: Step 2 — fetch full profile data for a list of handles ─────────────
+
+async function getProfilesForHandles(handles: string[]): Promise<Array<{
+  username: string;
+  fullName: string;
+  biography: string;
+  followersCount: number;
+  followsCount: number;
+  postsCount: number;
+  isPrivate: boolean;
+}>> {
+  const directUrls = handles.map(
+    (h) => `https://www.instagram.com/${h}/`
+  );
+
+  const runRes = await fetch(
+    `${APIFY_BASE}/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_TOKEN}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        directUrls,
+        resultsType: 'details', // profile-level data including bio + follower count
+        resultsLimit: 1,        // 1 result per profile URL
+      }),
+    }
+  );
+
+  if (!runRes.ok) {
+    const text = await runRes.text();
+    throw new Error(`Apify profile run failed: ${runRes.status} ${text}`);
+  }
+
+  const runData = await runRes.json() as { data: { id: string } };
+  const items = await pollApifyRun(runData.data.id, 120);
+
+  return items.map((item) => {
+    const p = item as {
+      username?: string;
+      fullName?: string;
+      biography?: string;
+      followersCount?: number;
+      followsCount?: number;
+      postsCount?: number;
+      isPrivate?: boolean;
+    };
+    return {
+      username: p.username ?? '',
+      fullName: p.fullName ?? '',
+      biography: p.biography ?? '',
+      followersCount: p.followersCount ?? 0,
+      followsCount: p.followsCount ?? 0,
+      postsCount: p.postsCount ?? 0,
+      isPrivate: p.isPrivate ?? false,
+    };
+  }).filter((p) => p.username !== '');
+}
+
+// ── Shared poll helper ────────────────────────────────────────────────────────
+
+async function pollApifyRun(runId: string, timeoutSecs: number): Promise<unknown[]> {
+  const maxPolls = Math.floor(timeoutSecs / 5);
+
+  for (let i = 0; i < maxPolls; i++) {
     await sleep(5000);
 
     const statusRes = await fetch(
@@ -106,7 +176,7 @@ async function runApifyHashtagScraper(hashtags: string[]): Promise<unknown[]> {
 
     if (status === 'SUCCEEDED') {
       const dataRes = await fetch(
-        `${APIFY_BASE}/datasets/${defaultDatasetId}/items?token=${APIFY_TOKEN}&limit=50`
+        `${APIFY_BASE}/datasets/${defaultDatasetId}/items?token=${APIFY_TOKEN}&limit=100`
       );
       const items = await dataRes.json() as unknown[];
       return Array.isArray(items) ? items : [];
@@ -115,11 +185,11 @@ async function runApifyHashtagScraper(hashtags: string[]): Promise<unknown[]> {
     if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
       throw new Error(`Apify run ${runId} ended with status: ${status}`);
     }
-    // RUNNING or READY — keep polling
   }
 
-  throw new Error(`Apify run ${runId} timed out after 90s`);
+  throw new Error(`Apify run ${runId} timed out after ${timeoutSecs}s`);
 }
+
 
 // ── Main scout function ───────────────────────────────────────────────────────
 
@@ -187,12 +257,12 @@ export async function runScout(pool: Pool): Promise<{
     UPDATE scout_memory SET last_run = NOW(), updated_at = NOW() WHERE date = $1
   `, [today]);
 
-  // Run Apify
-  let rawItems: unknown[] = [];
+  // Phase 1: get unique handles from hashtag posts
+  let rawHandles: string[] = [];
   try {
-    rawItems = await runApifyHashtagScraper(hashtags);
+    rawHandles = await getHandlesFromHashtags(hashtags);
   } catch (err) {
-    console.error('[scout] Apify error:', err);
+    console.error('[scout] Phase 1 (hashtag) error:', err);
     await pool.query(`
       INSERT INTO activity_log (source, action, detail)
       VALUES ('scout', 'apify_error', $1)
@@ -200,7 +270,34 @@ export async function runScout(pool: Pool): Promise<{
     return { found: 0, skipped: 0, refusalReason: `Apify error: ${err}` };
   }
 
-  // Extract unique owner accounts from posts
+  // Filter out already-known handles before doing profile lookups
+  const newHandles = rawHandles.filter((h) => !knownHandles.has(h)).slice(0, 10);
+
+  if (newHandles.length === 0) {
+    console.log('[scout] All handles already known, nothing to enrich');
+    return { found: 0, skipped: rawHandles.length };
+  }
+
+  console.log(`[scout] Step 2: fetching profiles for ${newHandles.length} new handles`);
+
+  // Phase 2: fetch full profile data for new handles
+  let profiles: Awaited<ReturnType<typeof getProfilesForHandles>> = [];
+  try {
+    profiles = await getProfilesForHandles(newHandles);
+    console.log(`[scout] Step 2: got ${profiles.length} profiles`);
+    if (profiles.length > 0) {
+      console.log(`[scout] Sample profile: ${JSON.stringify(profiles[0]).slice(0, 300)}`);
+    }
+  } catch (err) {
+    console.error('[scout] Phase 2 (profile) error:', err);
+    await pool.query(`
+      INSERT INTO activity_log (source, action, detail)
+      VALUES ('scout', 'apify_error', $1)
+    `, [`Phase 2: ${err instanceof Error ? err.message : String(err)}`]);
+    return { found: 0, skipped: 0, refusalReason: `Apify profile error: ${err}` };
+  }
+
+  // Qualify profiles against ICP criteria
   const seen = new Set<string>();
   const candidates: Array<{
     handle: string;
@@ -211,61 +308,25 @@ export async function runScout(pool: Pool): Promise<{
     post_count: number;
   }> = [];
 
-  console.log(`[scout] Apify returned ${rawItems.length} raw items`);
-  if (rawItems.length > 0) {
-    const sample = rawItems[0] as Record<string, unknown>;
-    console.log(`[scout] Sample item keys: ${Object.keys(sample).join(', ')}`);
-    console.log(`[scout] Sample item (truncated): ${JSON.stringify(sample).slice(0, 500)}`);
-  }
-
-  for (const item of rawItems) {
-    const post = item as {
-      ownerUsername?: string;
-      ownerFullName?: string;
-      // addParentData nests profile fields under owner
-      owner?: {
-        username?: string;
-        fullName?: string;
-        biography?: string;
-        followersCount?: number;
-        followsCount?: number;
-        postsCount?: number;
-        isPrivate?: boolean;
-      };
-      // Sometimes flattened at top level
-      biography?: string;
-      followersCount?: number;
-      followsCount?: number;
-      postsCount?: number;
-      isPrivate?: boolean;
-    };
-
-    const handle = post.owner?.username ?? post.ownerUsername;
-    const biography = post.owner?.biography ?? post.biography ?? '';
-    const followersCount = post.owner?.followersCount ?? post.followersCount ?? 0;
-    const followsCount = post.owner?.followsCount ?? post.followsCount ?? 0;
-    const postsCount = post.owner?.postsCount ?? post.postsCount ?? 0;
-    const isPrivate = post.owner?.isPrivate ?? post.isPrivate ?? false;
-    const fullName = post.owner?.fullName ?? post.ownerFullName ?? '';
-
-    if (!handle || seen.has(handle) || knownHandles.has(handle)) continue;
-    seen.add(handle);
+  for (const profile of profiles) {
+    if (seen.has(profile.username) || knownHandles.has(profile.username)) continue;
+    seen.add(profile.username);
 
     if (isQualifiedProspect({
-      username: handle,
-      biography,
-      followersCount,
-      followsCount,
-      isPrivate,
-      postsCount,
+      username: profile.username,
+      biography: profile.biography,
+      followersCount: profile.followersCount,
+      followsCount: profile.followsCount,
+      isPrivate: profile.isPrivate,
+      postsCount: profile.postsCount,
     })) {
       candidates.push({
-        handle,
-        name: fullName,
-        bio: biography,
-        follower_count: followersCount,
-        following_count: followsCount,
-        post_count: postsCount,
+        handle: profile.username,
+        name: profile.fullName,
+        bio: profile.biography,
+        follower_count: profile.followersCount,
+        following_count: profile.followsCount,
+        post_count: profile.postsCount,
       });
 
       if (candidates.length >= MAX_PROSPECTS_PER_RUN) break;
@@ -299,9 +360,10 @@ export async function runScout(pool: Pool): Promise<{
   }
 
   // Update memory
+  const insertedHandles = candidates.filter((_, i) => i < inserted).map((c) => c.handle);
   const updatedHandles = [
     ...(memory.discovered_handles as string[]),
-    ...newHandles,
+    ...insertedHandles,
   ];
 
   await pool.query(`
