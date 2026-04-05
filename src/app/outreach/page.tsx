@@ -645,6 +645,8 @@ export default function OutreachPage() {
   const [health, setHealth] = useState<PipelineHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [triggering, setTriggering] = useState<string | null>(null);
+  const [triggerResult, setTriggerResult] = useState<string | null>(null);
 
   const loadQueue = useCallback(async () => {
     try {
@@ -689,6 +691,31 @@ export default function OutreachPage() {
 
     } catch (err) {
       console.error('Update failed:', err);
+    }
+  }, [loadQueue]);
+
+  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout') => {
+    setTriggering(job);
+    setTriggerResult(null);
+    try {
+      const res = await fetch(`/api/outreach/trigger?job=${job}`, { method: 'POST' });
+      const data = await res.json() as { ok?: boolean; result?: Record<string, unknown>; error?: string };
+      if (data.ok) {
+        const r = data.result ?? {};
+        const summary = job === 'radar'
+          ? `action=${r.action} ${r.detail}`
+          : job === 'analyst'
+          ? `scored=${( r as {scored?:number}).scored ?? 0} dms=${(r as {dmsGenerated?:number}).dmsGenerated ?? 0} rejected=${(r as {rejected?:number}).rejected ?? 0}`
+          : `found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
+        setTriggerResult(`✓ ${summary}`);
+        await loadQueue();
+      } else {
+        setTriggerResult(`✗ ${data.error ?? 'Unknown error'}`);
+      }
+    } catch (err) {
+      setTriggerResult(`✗ ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTriggering(null);
     }
   }, [loadQueue]);
 
@@ -778,6 +805,44 @@ export default function OutreachPage() {
             </div>
           </div>
         )}
+
+        {/* Manual trigger panel */}
+        <div style={{
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 10, padding: '12px 16px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontSize: 11, color: C.textDim, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: 4 }}>
+            Manual Trigger
+          </span>
+          {(['radar', 'scout', 'analyst'] as const).map((job) => (
+            <button
+              key={job}
+              onClick={() => handleTrigger(job)}
+              disabled={!!triggering}
+              style={{
+                padding: '5px 14px',
+                background: triggering === job ? `${C.coral}22` : C.badge,
+                border: `1px solid ${triggering === job ? C.coral : C.borderStrong}`,
+                borderRadius: 6,
+                color: triggering === job ? C.coral : C.textMuted,
+                fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.15s',
+              }}
+            >
+              {triggering === job ? `Running ${job}...` : `Run ${job}`}
+            </button>
+          ))}
+          {triggerResult && (
+            <span style={{
+              fontSize: 11, fontWeight: 500,
+              color: triggerResult.startsWith('✓') ? C.green : C.red,
+              marginLeft: 4,
+            }}>
+              {triggerResult}
+            </span>
+          )}
+        </div>
 
         {/* Tab bar */}
         <div style={{
