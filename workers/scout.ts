@@ -161,18 +161,42 @@ function isOwner(account: {
 
 // ── Track A/B classification ──────────────────────────────────────────────────
 
+// Known product/equipment brands — tagging these is NOT a local business collab
+const PRODUCT_BRANDS = new Set([
+  'platedskinscience','skinbetter','allergan','hydrafacial','inmode',
+  'galderma','merz','revance','botox','juvederm','restylane','sculptra',
+  'kybella','coolsculpting','zeltiq','solta','cutera','syneron',
+  'candela','lumenis','cynosure','sciton','venus','btlbody',
+  'emsculpt','morpheus8','sofwave','ultherapy','thermage',
+  'facerealityskincare','skinceuticals','obagi','zetaon','isdin',
+  'colorescience','eltamd','sunbetter','latisse','xeomin','dysport',
+  'radiesse','belotero','teoxane','stylage','perfectha',
+]);
+
 function classifyTrack(profile: {
   recentCaptions: string[]; collabSignals: string[]; bio: string;
 }): 'A' | 'B' {
-  const collabPhrases = ['collab','collaboration','partner','partnership',
-    'teamed up','joined forces','excited to announce','working with','together with'];
+  // Only count tagged accounts that are NOT known product brands
+  const localBusinessTags = profile.collabSignals.filter(
+    handle => !PRODUCT_BRANDS.has(handle.toLowerCase().replace('@',''))
+  );
+
+  const collabPhrases = [
+    'collab','collaboration','partner','partnership',
+    'teamed up','joined forces','excited to announce','working with','together with',
+  ];
   const captionText = profile.recentCaptions.join(' ').toLowerCase();
   const bioLower = (profile.bio ?? '').toLowerCase();
 
+  // Caption collab language is only meaningful if it's not just about a product launch
+  const productLaunchPhrases = ['introducing','new product','now carrying','now stocking','excited to carry'];
+  const captionHasCollab = collabPhrases.some(p => captionText.includes(p))
+    && !productLaunchPhrases.some(p => captionText.includes(p));
+
   return (
-    profile.collabSignals.length > 0 ||
-    collabPhrases.some(p => captionText.includes(p)) ||
-    ['collab','partnership','partner with us','open to'].some(p => bioLower.includes(p))
+    localBusinessTags.length > 0 ||
+    captionHasCollab ||
+    ['collab','partnership','partner with us','open to collab'].some(p => bioLower.includes(p))
   ) ? 'A' : 'B';
 }
 

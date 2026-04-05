@@ -41,10 +41,17 @@ All scores must be integers ≥ 0. Never negative.
 TRACK A SCORING (collab-active):
 
 Collab Behavior (25 pts max)
-- Tagged local business partner in post within 30 days → 25
-- Collab content exists but older than 30 days → 16
-- "Collab" or "partner" language in captions but no tags → 10
-- Only bio mentions collab → 6
+
+CRITICAL: A collab for IvyLink means a LOCAL BUSINESS PARTNERSHIP where two businesses cross-refer clients — med spa + gym, + hair salon, + bridal boutique, + yoga studio, + chiropractor, + personal trainer, + restaurant, + boutique.
+
+This is NOT a collab and scores 0: tagging skincare/equipment brands (Plated Skin Science, SkinBetter, Allergan, Hydrafacial, InMode, Galderma, Merz, Revance etc.), posting about products they stock, sponsored brand posts, or national vendor partnerships. These are supplier relationships, not local business collabs IvyLink helps with.
+
+- Tagged a LOCAL BUSINESS (gym, salon, studio, boutique, fitness, restaurant) as partner in last 30 days → 25
+- Collab language in caption WITH a local business (not a brand) → 20
+- Local business collab content but older than 30 days → 15
+- Open to collabs language in bio, no evidence yet → 8
+- Only tags product/equipment brands → 0
+- No collab signals → 0
 
 Local Relevance (20 pts max)
 - NJ or NYC with city-level location tags in posts → 20
@@ -77,9 +84,10 @@ Brand Fit (10 pts max)
 
 TRACK B SCORING (collab-ready):
 
-Collab Behavior (10 pts max) — reduced weight, they haven't done collabs yet
-- Mentions being "open to collabs" or similar → 10
-- Tags local (non-product) businesses occasionally → 6
+Collab Behavior (10 pts max) — reduced weight, they haven't done local collabs yet
+- Mentions being "open to collabs" with local businesses in bio → 10
+- Occasionally tags local non-product businesses (salons, gyms, studios) → 6
+- Only tags product/equipment brands — scores 0, same as no signal → 0
 - No collab signals → 0
 
 Local Relevance (25 pts max) — increased weight, local strength matters more
