@@ -201,13 +201,7 @@ export async function runScout(pool: Pool): Promise<{
   }
 
   // Extract unique owner accounts from posts
-  console.log(`[scout] Apify returned ${rawItems.length} raw items`);
-  if (rawItems.length > 0) {
-    // Log the first item's keys so we can see the actual field names
-    const sample = rawItems[0] as Record<string, unknown>;
-    console.log(`[scout] Sample item keys: ${Object.keys(sample).join(', ')}`);
-    console.log(`[scout] Sample item (truncated): ${JSON.stringify(sample).slice(0, 500)}`);
-  }
+  const seen = new Set<string>();
   const candidates: Array<{
     handle: string;
     name: string;
@@ -216,6 +210,13 @@ export async function runScout(pool: Pool): Promise<{
     following_count: number;
     post_count: number;
   }> = [];
+
+  console.log(`[scout] Apify returned ${rawItems.length} raw items`);
+  if (rawItems.length > 0) {
+    const sample = rawItems[0] as Record<string, unknown>;
+    console.log(`[scout] Sample item keys: ${Object.keys(sample).join(', ')}`);
+    console.log(`[scout] Sample item (truncated): ${JSON.stringify(sample).slice(0, 500)}`);
+  }
 
   for (const item of rawItems) {
     const post = item as {
