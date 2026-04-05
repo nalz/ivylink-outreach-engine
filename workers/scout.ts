@@ -8,7 +8,8 @@
 import { Pool } from 'pg';
 
 const APIFY_TOKEN = process.env.APIFY_TOKEN!;
-const APIFY_ACTOR_ID = 'apify/instagram-scraper';
+// Correct format: creator~actor-name (tilde, not slash)
+const APIFY_ACTOR_ID = 'apify~instagram-scraper';
 const APIFY_BASE = 'https://api.apify.com/v2';
 
 // Max 2 prospects per scout run (human behavior mirroring)
@@ -63,52 +64,61 @@ function isQualifiedProspect(account: {
 // ── Apify run + result fetch ──────────────────────────────────────────────────
 
 async function runApifyHashtagScraper(hashtags: string[]): Promise<unknown[]> {
-  // Start the actor
+  // Build hashtag URLs — apify~instagram-scraper accepts directUrls
+  const directUrls = hashtags.map(
+    (h) => `https://www.instagram.com/explore/tags/${h.replace('#', '')}/`
+  );
+
+  // Start the actor run
   const runRes = await fetch(
     `${APIFY_BASE}/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_TOKEN}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        directUrls: hashtags.map((h) => `https://www.instagram.com/explore/tags/${h.replace('#', '')}/`),
-        resultsType: 'posts',
-        resultsLimit: 20, // We'll filter down to 2
-        searchType: 'hashtag',
-        searchLimit: 5,
+        directUrls,
+        resultsType: 'posts',   // posts | details | comments | stories
+        resultsLimit: 20,       // per URL — we filter down to 2 qualified
+        addParentData: true,    // includes owner profile fields on each post
       }),
     }
   );
 
   if (!runRes.ok) {
-    throw new Error(`Apify start failed: ${runRes.status} ${await runRes.text()}`);
+    const text = await runRes.text();
+    throw new Error(`Apify start failed: ${runRes.status} ${text}`);
   }
 
-  const { data: runData } = await runRes.json() as { data: { id: string } };
-  const runId = runData.id;
+  const runData = await runRes.json() as { data: { id: string } };
+  const runId = runData.data.id;
 
-  // Poll for completion (max 60s)
-  for (let i = 0; i < 12; i++) {
+  // Poll for completion (max 90s — hashtag scrapes can be slow)
+  for (let i = 0; i < 18; i++) {
     await sleep(5000);
 
     const statusRes = await fetch(
       `${APIFY_BASE}/actor-runs/${runId}?token=${APIFY_TOKEN}`
     );
-    const { data: status } = await statusRes.json() as { data: { status: string; defaultDatasetId: string } };
+    const statusData = await statusRes.json() as {
+      data: { status: string; defaultDatasetId: string }
+    };
+    const { status, defaultDatasetId } = statusData.data;
 
-    if (status.status === 'SUCCEEDED') {
+    if (status === 'SUCCEEDED') {
       const dataRes = await fetch(
-        `${APIFY_BASE}/datasets/${status.defaultDatasetId}/items?token=${APIFY_TOKEN}`
+        `${APIFY_BASE}/datasets/${defaultDatasetId}/items?token=${APIFY_TOKEN}&limit=50`
       );
       const items = await dataRes.json() as unknown[];
-      return items;
+      return Array.isArray(items) ? items : [];
     }
 
-    if (status.status === 'FAILED' || status.status === 'ABORTED') {
-      throw new Error(`Apify run ${runId} ${status.status}`);
+    if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
+      throw new Error(`Apify run ${runId} ended with status: ${status}`);
     }
+    // RUNNING or READY — keep polling
   }
 
-  throw new Error(`Apify run ${runId} timed out`);
+  throw new Error(`Apify run ${runId} timed out after 90s`);
 }
 
 // ── Main scout function ───────────────────────────────────────────────────────
@@ -205,6 +215,17 @@ export async function runScout(pool: Pool): Promise<{
     const post = item as {
       ownerUsername?: string;
       ownerFullName?: string;
+      // addParentData nests profile fields under owner
+      owner?: {
+        username?: string;
+        fullName?: string;
+        biography?: string;
+        followersCount?: number;
+        followsCount?: number;
+        postsCount?: number;
+        isPrivate?: boolean;
+      };
+      // Sometimes flattened at top level
       biography?: string;
       followersCount?: number;
       followsCount?: number;
@@ -212,25 +233,32 @@ export async function runScout(pool: Pool): Promise<{
       isPrivate?: boolean;
     };
 
-    const handle = post.ownerUsername;
+    const handle = post.owner?.username ?? post.ownerUsername;
+    const biography = post.owner?.biography ?? post.biography ?? '';
+    const followersCount = post.owner?.followersCount ?? post.followersCount ?? 0;
+    const followsCount = post.owner?.followsCount ?? post.followsCount ?? 0;
+    const postsCount = post.owner?.postsCount ?? post.postsCount ?? 0;
+    const isPrivate = post.owner?.isPrivate ?? post.isPrivate ?? false;
+    const fullName = post.owner?.fullName ?? post.ownerFullName ?? '';
+
     if (!handle || seen.has(handle) || knownHandles.has(handle)) continue;
     seen.add(handle);
 
     if (isQualifiedProspect({
       username: handle,
-      biography: post.biography ?? '',
-      followersCount: post.followersCount ?? 0,
-      followsCount: post.followsCount ?? 0,
-      isPrivate: post.isPrivate ?? false,
-      postsCount: post.postsCount ?? 0,
+      biography,
+      followersCount,
+      followsCount,
+      isPrivate,
+      postsCount,
     })) {
       candidates.push({
         handle,
-        name: post.ownerFullName ?? '',
-        bio: post.biography ?? '',
-        follower_count: post.followersCount ?? 0,
-        following_count: post.followsCount ?? 0,
-        post_count: post.postsCount ?? 0,
+        name: fullName,
+        bio: biography,
+        follower_count: followersCount,
+        following_count: followsCount,
+        post_count: postsCount,
       });
 
       if (candidates.length >= MAX_PROSPECTS_PER_RUN) break;
