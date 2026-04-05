@@ -396,7 +396,7 @@ function ProspectCard({
           {/* Deep Links */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
             <a
-              href={prospect.profile_url}
+              href={`https://instagram.com/${prospect.handle}/`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -410,7 +410,7 @@ function ProspectCard({
               ↗ View Profile
             </a>
             <a
-              href={prospect.dm_url}
+              href={`https://ig.me/m/${prospect.handle}`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -468,49 +468,63 @@ function ProspectCard({
 
           {/* Category 1: Warmup copy */}
           <CategoryHeader number="1" title="Warmup" subtitle="Do these first, 24-48h before DM" />
-          <CopyBlock text={prospect.story_reply} label="Story Reply" />
-          <CopyBlock text={prospect.post_comment} label="Post Comment" />
+          {prospect.story_reply
+            ? <CopyBlock text={prospect.story_reply} label="Story Reply — paste this when they post a story" />
+            : <div style={{ fontSize: 12, color: C.textDim, marginBottom: 8, padding: '8px 12px', background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>No story reply generated — rerun analyst to regenerate copy.</div>
+          }
+          {prospect.post_comment
+            ? <CopyBlock text={prospect.post_comment} label="Post Comment — leave on their most recent post" />
+            : <div style={{ fontSize: 12, color: C.textDim, marginBottom: 8, padding: '8px 12px', background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>No post comment generated — rerun analyst to regenerate copy.</div>
+          }
 
           {/* Category 2: DM */}
           <div style={{ marginTop: 20, marginBottom: 4 }}>
             <CategoryHeader number="2" title="Outreach DM" subtitle="Send only after warmup. Pick one variant." />
 
-            {/* Variant picker */}
-            {variants.length > 1 && (
-              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-                {variants.map((v, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedVariant(i)}
-                    style={{
-                      padding: '4px 12px',
-                      background: selectedVariant === i ? `${C.coral}22` : C.badge,
-                      border: `1px solid ${selectedVariant === i ? C.coral : C.border}`,
-                      borderRadius: 6,
-                      color: selectedVariant === i ? C.coral : C.textMuted,
-                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    Style {v.style ?? String.fromCharCode(65 + i)}
-                  </button>
-                ))}
+            {variants.length === 0 ? (
+              <div style={{ fontSize: 12, color: C.textDim, padding: '8px 12px', background: C.bg, borderRadius: 6, border: `1px solid ${C.border}`, marginBottom: 12 }}>
+                No DM variants generated — rerun analyst to regenerate copy.
               </div>
-            )}
+            ) : (
+              <>
+                {/* Variant picker */}
+                {variants.length > 1 && (
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                    {variants.map((v, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setSelectedVariant(i)}
+                        style={{
+                          padding: '4px 12px',
+                          background: selectedVariant === i ? `${C.coral}22` : C.badge,
+                          border: `1px solid ${selectedVariant === i ? C.coral : C.border}`,
+                          borderRadius: 6,
+                          color: selectedVariant === i ? C.coral : C.textMuted,
+                          fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        Style {v.style ?? String.fromCharCode(65 + i)}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
-            {selectedDm && (
-              <div style={{
-                background: '#0f0f11',
-                border: `1px solid ${C.border}`,
-                borderRadius: 8, padding: '12px 14px', marginBottom: 12,
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                  <p style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.6, flex: 1, whiteSpace: 'pre-wrap' }}>
-                    {selectedDm}
-                  </p>
-                  <CopyButton text={selectedDm} />
-                </div>
-              </div>
+                {selectedDm && (
+                  <div style={{
+                    background: '#0f0f11',
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: '12px 14px', marginBottom: 12,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                      <p style={{ margin: 0, fontSize: 13, color: C.text, lineHeight: 1.6, flex: 1, whiteSpace: 'pre-wrap' }}>
+                        {selectedDm}
+                      </p>
+                      <CopyButton text={selectedDm} />
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -577,7 +591,7 @@ function FollowUpCard({
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <a
-            href={prospect.dm_url}
+            href={`https://ig.me/m/${prospect.handle}`}
             target="_blank"
             rel="noopener noreferrer"
             style={{

@@ -256,8 +256,14 @@ export async function runAnalyst(pool: Pool): Promise<{
       stats.enriched++;
       stats.scored++;
 
-      // Persist content if generated
-      if (result.status !== 'rejected' && result.content.dm_variant_1) {
+      // Persist content for any non-rejected prospect that has at least some copy
+      const hasContent = result.status !== 'rejected' && (
+        result.content.dm_variant_1 ||
+        result.content.story_reply ||
+        result.content.post_comment
+      );
+
+      if (hasContent) {
         // Truncate style codes — schema expects short strings, Claude returns e.g. "A3", "B2"
         const s = (v: string | null) => v ? v.slice(0, 10) : null;
         await pool.query(`
