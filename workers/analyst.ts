@@ -123,9 +123,17 @@ export async function runAnalyst(pool: Pool): Promise<{
     discovered_via: string | null;
     source_detail: string | null;
     status: string;
+    has_booking_link: boolean | null;
+    uses_stories: boolean | null;
+    recent_captions: string[];
+    collab_signals: string[];
+    local_signals: string[];
+    content_themes: string[];
   }>(`
     SELECT id, handle, name, bio, follower_count, following_count,
-           post_count, discovered_via, source_detail, status
+           post_count, discovered_via, source_detail, status,
+           has_booking_link, uses_stories,
+           recent_captions, collab_signals, local_signals, content_themes
     FROM prospects
     WHERE status IN ('discovered', 'enriched')
     ORDER BY discovered_at ASC
@@ -151,8 +159,17 @@ export async function runAnalyst(pool: Pool): Promise<{
         post_count: p.post_count,
         discovered_via: p.discovered_via,
         source_detail: p.source_detail,
-        // Apify enrichment data would be fetched here in production
-        // For now Claude infers from bio + metadata
+        link_in_bio: p.has_booking_link ? 'booking link detected' : null,
+        // Pass Apify-captured post signals so Claude can score accurately
+        recent_posts: (p.recent_captions ?? []).map((caption, i) => ({
+          caption_summary: caption,
+          post_type: 'photo' as const,
+          tagged_accounts: i === 0 ? (p.collab_signals ?? []) : [],
+          location_tag: (p.local_signals ?? [])[i] ?? undefined,
+        })),
+        story_highlights: p.uses_stories ? ['highlights detected'] : [],
+        recent_collab_posts: p.collab_signals ?? [],
+        location_from_bio: (p.local_signals ?? [])[0] ?? undefined,
       };
 
       const result = await analyzeProspect(profile);

@@ -194,6 +194,13 @@ async function getProfilesForHandles(handles: string[]): Promise<Array<{
   followsCount: number;
   postsCount: number;
   isPrivate: boolean;
+  hasBookingLink: boolean;
+  // Enrichment signals from latestPosts
+  recentCaptions: string[];        // last 5 caption summaries (first 200 chars each)
+  collabSignals: string[];         // tagged accounts found in recent posts
+  localSignals: string[];          // location tags found in recent posts
+  contentThemes: string[];         // hashtags used across recent posts
+  usesStories: boolean;
 }>> {
   const directUrls = handles.map(
     (h) => `https://www.instagram.com/${h}/`
@@ -206,8 +213,8 @@ async function getProfilesForHandles(handles: string[]): Promise<Array<{
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         directUrls,
-        resultsType: 'details', // profile-level data including bio + follower count
-        resultsLimit: 1,        // 1 result per profile URL
+        resultsType: 'details',
+        resultsLimit: 1,
       }),
     }
   );
@@ -229,7 +236,53 @@ async function getProfilesForHandles(handles: string[]): Promise<Array<{
       followsCount?: number;
       postsCount?: number;
       isPrivate?: boolean;
+      externalUrl?: string;
+      highlightReelCount?: number;
+      latestPosts?: Array<{
+        caption?: string;
+        locationName?: string;
+        hashtags?: string[];
+        taggedUsers?: Array<{ username?: string; fullName?: string }>;
+        type?: string;
+      }>;
     };
+
+    const posts = p.latestPosts ?? [];
+
+    // Extract caption snippets (first 200 chars, non-empty)
+    const recentCaptions = posts
+      .map((post) => (post.caption ?? '').slice(0, 200).trim())
+      .filter(Boolean)
+      .slice(0, 5);
+
+    // Extract tagged accounts (collab signals)
+    const collabSignals = posts
+      .flatMap((post) => post.taggedUsers ?? [])
+      .map((u) => u.username ?? u.fullName ?? '')
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i) // unique
+      .slice(0, 10);
+
+    // Extract location tags
+    const localSignals = posts
+      .map((post) => post.locationName ?? '')
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .slice(0, 5);
+
+    // Extract hashtags as content themes
+    const contentThemes = posts
+      .flatMap((post) => post.hashtags ?? [])
+      .filter((v, i, arr) => arr.indexOf(v) === i)
+      .slice(0, 15);
+
+    // Booking link detection
+    const bioLower = (p.biography ?? '').toLowerCase();
+    const hasBookingLink = !!(p.externalUrl) ||
+      ['book', 'booking', 'schedule', 'calendly', 'vagaro', 'mindbody', 'gloss'].some(
+        (kw) => bioLower.includes(kw)
+      );
+
     return {
       username: p.username ?? '',
       fullName: p.fullName ?? '',
@@ -238,6 +291,12 @@ async function getProfilesForHandles(handles: string[]): Promise<Array<{
       followsCount: p.followsCount ?? 0,
       postsCount: p.postsCount ?? 0,
       isPrivate: p.isPrivate ?? false,
+      hasBookingLink,
+      recentCaptions,
+      collabSignals,
+      localSignals,
+      contentThemes,
+      usesStories: (p.highlightReelCount ?? 0) > 0,
     };
   }).filter((p) => p.username !== '');
 }
@@ -397,6 +456,12 @@ export async function runScout(pool: Pool): Promise<{
     follower_count: number;
     following_count: number;
     post_count: number;
+    has_booking_link: boolean;
+    recent_captions: string[];
+    collab_signals: string[];
+    local_signals: string[];
+    content_themes: string[];
+    uses_stories: boolean;
   }> = [];
 
   for (const profile of profiles) {
@@ -418,6 +483,12 @@ export async function runScout(pool: Pool): Promise<{
         follower_count: profile.followersCount,
         following_count: profile.followsCount,
         post_count: profile.postsCount,
+        has_booking_link: profile.hasBookingLink,
+        recent_captions: profile.recentCaptions,
+        collab_signals: profile.collabSignals,
+        local_signals: profile.localSignals,
+        content_themes: profile.contentThemes,
+        uses_stories: profile.usesStories,
       });
 
       if (candidates.length >= MAX_PROSPECTS_PER_RUN) break;
@@ -430,12 +501,23 @@ export async function runScout(pool: Pool): Promise<{
 
   for (const c of candidates) {
     const { rowCount } = await pool.query(`
-      INSERT INTO prospects (handle, name, bio, follower_count, following_count,
-                             post_count, discovered_via, source_detail)
-      VALUES ($1, $2, $3, $4, $5, $6, 'hashtag', $7)
+      INSERT INTO prospects (
+        handle, name, bio, follower_count, following_count, post_count,
+        discovered_via, source_detail,
+        has_booking_link, uses_stories,
+        recent_captions, collab_signals, local_signals, content_themes
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,'hashtag',$7,$8,$9,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)
       ON CONFLICT (handle) DO NOTHING
-    `, [c.handle, c.name, c.bio, c.follower_count, c.following_count,
-       c.post_count, hashtags.join(', ')]);
+    `, [
+      c.handle, c.name, c.bio, c.follower_count, c.following_count, c.post_count,
+      isSeedStrategy ? SEED_ACCOUNTS.join(', ') : hashtags.join(', '),
+      c.has_booking_link, c.uses_stories,
+      JSON.stringify(c.recent_captions),
+      JSON.stringify(c.collab_signals),
+      JSON.stringify(c.local_signals),
+      JSON.stringify(c.content_themes),
+    ]);
 
     if (rowCount && rowCount > 0) {
       inserted++;
