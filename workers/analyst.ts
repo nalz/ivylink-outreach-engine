@@ -157,6 +157,13 @@ export async function runAnalyst(pool: Pool): Promise<{
 
       const result = await analyzeProspect(profile);
 
+      const validActivityLevel = ['active', 'moderate', 'inactive'].includes(result.enrichment.activity_level)
+        ? result.enrichment.activity_level
+        : 'moderate';
+      const validPostingFreq = ['daily', 'weekly', 'sporadic'].includes(result.enrichment.posting_frequency)
+        ? result.enrichment.posting_frequency
+        : 'sporadic';
+
       // Persist score and enrichment
       await pool.query(`
         UPDATE prospects SET
@@ -193,8 +200,8 @@ export async function runAnalyst(pool: Pool): Promise<{
         result.score_breakdown.brand_fit,
         result.score_reasoning,
         JSON.stringify(result.red_flags),
-        result.enrichment.activity_level,
-        result.enrichment.posting_frequency,
+        validActivityLevel,
+        validPostingFreq,
         result.enrichment.uses_stories,
         result.enrichment.has_booking_link,
         JSON.stringify(result.enrichment.content_themes),

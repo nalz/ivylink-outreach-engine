@@ -143,6 +143,9 @@ RESPONSE FORMAT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Return this exact JSON structure. No extra keys. No markdown fences.
+For enum fields, NEVER return "unknown" or null — always pick the closest valid option.
+activity_level must be one of: "active", "moderate", "inactive" — default to "moderate" if unsure.
+posting_frequency must be one of: "daily", "weekly", "sporadic" — default to "sporadic" if unsure.
 
 {
   "prospect_id": "<string — pass through from input>",

@@ -19,21 +19,36 @@ const MAX_PROFILE_LOOKUPS = 25;
 const DAILY_DISCOVERY_LIMIT = 30;
 const MIN_GAP_MINUTES = 25;
 
-// NJ/local hashtags in priority order
-const HASHTAG_STRATEGIES = [
-  ['#newjerseymedspa', '#njmedspa', '#medspabusiness'],
-  ['#medspagrowth', '#medspamarketing', '#aestheticbusiness'],
-  ['#injectables', '#hydrafacial', '#botox'],
-  ['#hobokenmedspa', '#jerseycitymedspa', '#montclairmedspa'],
-  ['#medspa', '#microneedling', '#aestheticsbusiness'],
+// ── Discovery strategies ───────────────────────────────────────────────────────
+
+// Seed accounts: known NJ med spas whose followers/following lists
+// contain other med spa owners. Much higher signal than hashtags.
+const SEED_ACCOUNTS = [
+  'hlmedspa.official',
+  'time2dripmedspa',
+  'thegardenmedspanj',
+  'luminarymedspa',
+  'glowbarmedspa',
+  'njskinclinic',
+  'aestheticsbydesignnj',
+  'njlasercenter',
 ] as const;
 
-// Strategy names that map to the hashtag groups
+// Hashtag strategies as fallback — lower signal, cast wider net
+const HASHTAG_STRATEGIES = [
+  ['#newjerseymedspa', '#njmedspa'],
+  ['#medspabusiness', '#medspagrowth', '#medspamarketing'],
+  ['#injectables', '#botox', '#hydrafacial'],
+  ['#hobokenmedspa', '#jerseycitymedspa', '#montclairmedspa', '#summitmedspa'],
+  ['#medspa', '#aestheticbusiness', '#aestheticsbusiness'],
+] as const;
+
 const STRATEGY_NAMES = [
+  'seed_followers',     // Scan following lists of known NJ med spas
   'hashtag_local_nj',
-  'hashtag_business_intent',
+  'hashtag_business',
   'hashtag_service',
-  'hashtag_city_specific',
+  'hashtag_city',
   'hashtag_volume',
 ] as const;
 
@@ -74,7 +89,63 @@ function isQualifiedProspect(account: {
   return true;
 }
 
-// ── Apify: Step 1 — extract unique handles from hashtag posts ─────────────────
+// ── Apify: Step 1a — get handles from seed account following lists ────────────
+// Following lists of known med spas contain other med spa owners.
+// Much higher signal than hashtag posts.
+
+async function getHandlesFromSeedAccounts(seeds: readonly string[]): Promise<string[]> {
+  // Use profile details to get following list signals
+  // We scrape the seed profiles' following as directUrls
+  const directUrls = seeds.map((s) => `https://www.instagram.com/${s}/`);
+
+  const runRes = await fetch(
+    `${APIFY_BASE}/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_TOKEN}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        directUrls,
+        resultsType: 'details',
+        resultsLimit: 1,
+      }),
+    }
+  );
+
+  if (!runRes.ok) {
+    const text = await runRes.text();
+    throw new Error(`Apify seed run failed: ${runRes.status} ${text}`);
+  }
+
+  const runData = await runRes.json() as { data: { id: string } };
+  const items = await pollApifyRun(runData.data.id, 90);
+
+  // Extract latestPosts authors and tagged users from seed profiles
+  // as proxies for their network — accounts that interact with known med spas
+  const handles = new Set<string>();
+  for (const item of items) {
+    const profile = item as {
+      username?: string;
+      latestPosts?: Array<{
+        ownerUsername?: string;
+        taggedUsers?: Array<{ username?: string }>;
+        coauthorProducers?: Array<{ username?: string }>;
+      }>;
+    };
+
+    // Accounts tagged in the seed's posts are strong ICP signals
+    for (const post of profile.latestPosts ?? []) {
+      for (const tagged of post.taggedUsers ?? []) {
+        if (tagged.username) handles.add(tagged.username);
+      }
+      for (const coauthor of post.coauthorProducers ?? []) {
+        if (coauthor.username) handles.add(coauthor.username);
+      }
+    }
+  }
+
+  console.log(`[scout] Seed strategy: found ${handles.size} handles from ${seeds.length} seed accounts`);
+  return [...handles];
+}
 
 async function getHandlesFromHashtags(hashtags: string[]): Promise<string[]> {
   const directUrls = hashtags.map(
@@ -249,12 +320,15 @@ export async function runScout(pool: Pool): Promise<{
     return { found: 0, skipped: 0, refusalReason: reason };
   }
 
-  // Pick strategy (rotate, never repeat last 2)
+  // Pick strategy — seed_followers is index 0, hashtags are 1-5
   const strategyIndex = memory.strategy_index % STRATEGY_NAMES.length;
   const strategyName = STRATEGY_NAMES[strategyIndex];
-  const hashtags = [...HASHTAG_STRATEGIES[strategyIndex]];
+  const isSeedStrategy = strategyName === 'seed_followers';
+  // Hashtag strategies start at index 1, so offset by 1
+  const hashtagIndex = Math.max(0, strategyIndex - 1) % HASHTAG_STRATEGIES.length;
+  const hashtags = isSeedStrategy ? [] : [...HASHTAG_STRATEGIES[hashtagIndex]];
 
-  console.log(`[scout] Running strategy: ${strategyName} with ${hashtags.join(', ')}`);
+  console.log(`[scout] Running strategy: ${strategyName}${!isSeedStrategy ? ` with ${hashtags.join(', ')}` : ''}`);
 
   // Get known handles to avoid duplicates
   const { rows: knownRows } = await pool.query<{ handle: string }>(
@@ -270,12 +344,16 @@ export async function runScout(pool: Pool): Promise<{
     UPDATE scout_memory SET last_run = NOW(), updated_at = NOW() WHERE date = $1
   `, [today]);
 
-  // Phase 1: get unique handles from hashtag posts
+  // Phase 1: get unique handles from seed accounts or hashtag posts
   let rawHandles: string[] = [];
   try {
-    rawHandles = await getHandlesFromHashtags(hashtags);
+    if (isSeedStrategy) {
+      rawHandles = await getHandlesFromSeedAccounts(SEED_ACCOUNTS);
+    } else {
+      rawHandles = await getHandlesFromHashtags(hashtags);
+    }
   } catch (err) {
-    console.error('[scout] Phase 1 (hashtag) error:', err);
+    console.error('[scout] Phase 1 error:', err);
     await pool.query(`
       INSERT INTO activity_log (source, action, detail)
       VALUES ('scout', 'apify_error', $1)
