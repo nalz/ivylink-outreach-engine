@@ -53,16 +53,16 @@ export async function POST(req: NextRequest) {
       const today = new Date().toISOString().split('T')[0];
 
       // Pipeline health
-      const [health] = await pool.query(`SELECT * FROM v_pipeline_health`);
-      const h = health.rows[0];
+      const healthRes = await pool.query(`SELECT * FROM v_pipeline_health`);
+      const h = healthRes.rows[0];
 
       // Scout memory for gap check
-      const [scoutMem] = await pool.query(
+      const scoutMemRes = await pool.query(
         `INSERT INTO scout_memory (date) VALUES ($1)
          ON CONFLICT (date) DO UPDATE SET date = EXCLUDED.date RETURNING *`,
         [today]
       );
-      const sm = scoutMem.rows[0];
+      const sm = scoutMemRes.rows[0];
 
       let action = 'idle';
       let detail = '';
