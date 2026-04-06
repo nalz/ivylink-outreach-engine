@@ -198,23 +198,40 @@ function classifyTrack(profile: {
     handle => !PRODUCT_BRANDS.has(handle.toLowerCase().replace('@',''))
   );
 
-  const collabPhrases = [
-    'collab','collaboration','partner','partnership',
-    'teamed up','joined forces','excited to announce','working with','together with',
-  ];
   const captionText = profile.recentCaptions.join(' ').toLowerCase();
   const bioLower = (profile.bio ?? '').toLowerCase();
 
-  // Caption collab language is only meaningful if it's not just about a product launch
-  const productLaunchPhrases = ['introducing','new product','now carrying','now stocking','excited to carry'];
-  const captionHasCollab = collabPhrases.some(p => captionText.includes(p))
-    && !productLaunchPhrases.some(p => captionText.includes(p));
+  // Phrases that indicate an ONGOING local business partnership
+  // (not one-off events or general collaboration language)
+  const ongoingCollabPhrases = [
+    'our partner', 'partnered with', 'partnership with',
+    'collab with', 'collaboration with', 'referral partner',
+    'worked with', 'teamed up with', 'joining forces with',
+    'proud to partner', 'excited to partner',
+  ];
 
-  return (
-    localBusinessTags.length > 0 ||
-    captionHasCollab ||
-    ['collab','partnership','partner with us','open to collab'].some(p => bioLower.includes(p))
-  ) ? 'A' : 'B';
+  // Phrases that indicate a one-off event/expo — NOT a Track A signal
+  const oneOffEventPhrases = [
+    'expo', 'event', 'pop-up', 'popup', 'conference', 'fair',
+    'health fair', 'vendor', 'booth', 'join us at', 'come see us',
+    'come find us', 'come visit', 'pulling up to', 'showing up at',
+  ];
+
+  // Caption has collab language AND it's not just an expo appearance
+  const captionHasOngoingCollab = ongoingCollabPhrases.some(p => captionText.includes(p))
+    && !oneOffEventPhrases.some(p => captionText.includes(p));
+
+  // Bio explicitly signals openness to ongoing partnerships
+  const bioHasCollab = [
+    'collab', 'partnership', 'partner with us', 'open to collab',
+    'open to partnerships', 'accepting collabs',
+  ].some(p => bioLower.includes(p));
+
+  // Must have BOTH local business tags AND ongoing collab language to be Track A
+  // A tagged account alone (from expo, event, photo credit) is not enough
+  const hasLocalPartnerWithContext = localBusinessTags.length > 0 && captionHasOngoingCollab;
+
+  return (hasLocalPartnerWithContext || bioHasCollab) ? 'A' : 'B';
 }
 
 // ── Apify helpers ─────────────────────────────────────────────────────────────
