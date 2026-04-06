@@ -27,7 +27,7 @@ const APIFY_ACTOR   = 'apify~instagram-scraper';
 const APIFY_BASE    = 'https://api.apify.com/v2';
 
 const MAX_PER_RUN         = 10;
-const MAX_PROFILE_LOOKUPS = 40;
+const MAX_PROFILE_LOOKUPS = 80;  // raised from 40 — covers more of the 200 raw handles
 const DAILY_LIMIT         = 40;
 const MIN_GAP_MINUTES     = 25;
 
@@ -57,6 +57,10 @@ const HASHTAG_GROUPS = [
   // Geo + treatment combos
   ['#njhydrafacial','#njmicroneedling','#njlaser','#nychydrafacial',
    '#nycmicroneedling','#nycskincare','#njskincare','#njinjector','#nycinjector'],
+  // Credential-based — licensed providers (NPs, PAs, RNs) who typically own their practice
+  // Narrow enough that most posters are the actual provider, not clients or vendors
+  ['#nurseinjector','#aestheticnurse','#aestheticnp','#aestheticpa',
+   '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
 ];
 
 // ── Geographic filter ─────────────────────────────────────────────────────────
@@ -244,9 +248,17 @@ async function pollRun(runId: string, timeoutSecs = 120): Promise<unknown[]> {
   throw new Error(`Run ${runId} timed out`);
 }
 
-// ── Phase 1: Parallel hashtag handle extraction ───────────────────────────────
+// ── Phase 1: Parallel hashtag scrape → lightweight candidate objects ──────────
 
-async function getHandlesFromHashtags(): Promise<string[]> {
+interface Phase1Candidate {
+  username: string;
+  displayName: string;
+  followersCount: number;
+  biography: string;    // may be empty if Apify doesn't return it on posts
+  isPrivate: boolean;
+}
+
+async function getHandlesFromHashtags(): Promise<Phase1Candidate[]> {
   console.log(`[scout] Phase 1: starting ${HASHTAG_GROUPS.length} parallel hashtag runs`);
 
   const runIds = await Promise.all(
@@ -263,18 +275,95 @@ async function getHandlesFromHashtags(): Promise<string[]> {
     runIds.map(id => id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[]))
   );
 
-  const handles = new Set<string>();
+  // Deduplicate by username — keep first occurrence
+  const seen = new Set<string>();
+  const candidates: Phase1Candidate[] = [];
+
   for (const items of results) {
     for (const item of items) {
-      const post = item as { ownerUsername?: string };
-      if (post.ownerUsername && !PERMANENT_EXCLUSIONS.has(post.ownerUsername)) {
-        handles.add(post.ownerUsername);
-      }
+      const post = item as {
+        ownerUsername?: string;
+        ownerFullName?: string;
+        biography?: string;
+        ownersFollowersCount?: number;
+        followersCount?: number;
+        isPrivate?: boolean;
+        owner?: {
+          username?: string;
+          fullName?: string;
+          biography?: string;
+          followersCount?: number;
+          isPrivate?: boolean;
+        };
+      };
+
+      const username = post.ownerUsername ?? post.owner?.username ?? '';
+      if (!username || seen.has(username) || PERMANENT_EXCLUSIONS.has(username)) continue;
+      seen.add(username);
+
+      candidates.push({
+        username,
+        displayName: post.ownerFullName ?? post.owner?.fullName ?? '',
+        biography: post.biography ?? post.owner?.biography ?? '',
+        followersCount: post.ownersFollowersCount ?? post.followersCount ?? post.owner?.followersCount ?? 0,
+        isPrivate: post.isPrivate ?? post.owner?.isPrivate ?? false,
+      });
     }
   }
 
-  console.log(`[scout] Phase 1: ${handles.size} unique handles from ${results.flat().length} posts`);
-  return [...handles];
+  const totalPosts = results.flat().length;
+  const withBio = candidates.filter(c => c.biography.length > 0).length;
+  const withFollowers = candidates.filter(c => c.followersCount > 0).length;
+  console.log(`[scout] Phase 1: ${candidates.length} unique accounts from ${totalPosts} posts (bio=${withBio} followers=${withFollowers})`);
+
+  return candidates;
+}
+
+// ── Phase 1.5: Pre-filter all candidates before expensive profile enrichment ───
+// Applies as much of isOwner() as possible from Phase 1 data.
+// Accounts without bio data get a soft pass — Phase 2 enrichment decides.
+
+function preFilter(
+  candidate: Phase1Candidate,
+  knownHandles: Set<string>
+): { pass: boolean; reason: string } {
+  if (knownHandles.has(candidate.username)) return { pass: false, reason: 'already known' };
+  if (candidate.isPrivate) return { pass: false, reason: 'private' };
+
+  // Follower range only if we have data
+  if (candidate.followersCount > 0) {
+    if (candidate.followersCount < 400 || candidate.followersCount > 150_000) {
+      return { pass: false, reason: `followers ${candidate.followersCount}` };
+    }
+  }
+
+  // Bio checks only if bio is present
+  if (candidate.biography.length > 0) {
+    const bio = candidate.biography.toLowerCase();
+    const name = candidate.displayName.toLowerCase();
+
+    const vendorSignals = [
+      'agency','software','saas','platform','app for','tool for',
+      'we help med spa','we help medspa','helping med spa','for med spas',
+      'marketing for','grow your','scale your','ai for',
+      'academy','course','coaching','consultant','distributor','supplier',
+    ];
+    if (vendorSignals.some(v => bio.includes(v))) return { pass: false, reason: 'vendor/agency' };
+
+    const hasIcp = ICP_KEYWORDS.some(kw => bio.includes(kw) || name.includes(kw));
+    if (!hasIcp) return { pass: false, reason: 'no ICP keyword' };
+
+    if (!isGeoMatch(candidate.biography, [])) return { pass: false, reason: 'non NJ/NYC geography' };
+
+    for (const pattern of EMPLOYEE_PATTERNS) {
+      if (pattern.test(candidate.biography)) return { pass: false, reason: 'employee pattern' };
+    }
+  }
+
+  return {
+    pass: true,
+    reason: candidate.biography.length === 0 ? 'soft pass (no bio in Phase 1)' : 'passed pre-filter',
+  };
 }
 
 // ── Phase 2: Batch profile enrichment ─────────────────────────────────────────
@@ -413,19 +502,46 @@ export async function runScout(pool: Pool): Promise<{
     ...PERMANENT_EXCLUSIONS,
   ]);
 
-  let rawHandles: string[] = [];
+  let phase1Candidates: Phase1Candidate[] = [];
   try {
-    rawHandles = await getHandlesFromHashtags();
+    phase1Candidates = await getHandlesFromHashtags();
   } catch (err) {
     return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}` };
   }
 
-  const newHandles = rawHandles.filter(h => !knownHandles.has(h)).slice(0, MAX_PROFILE_LOOKUPS);
-  if (newHandles.length === 0) return { found: 0, skipped: rawHandles.length };
+  // ── Phase 1.5: Pre-filter all candidates using available Phase 1 data ─────────
+  // This eliminates vendors, employees, wrong geo, and out-of-range follower counts
+  // BEFORE spending Apify credits on full profile enrichment.
+
+  const preFilterResults = phase1Candidates.map(c => ({
+    candidate: c,
+    ...preFilter(c, knownHandles),
+  }));
+
+  const passed = preFilterResults.filter(r => r.pass);
+  const rejected = preFilterResults.filter(r => !r.pass);
+
+  console.log(`[scout] Phase 1.5 pre-filter: ${passed.length} passed / ${rejected.length} rejected from ${phase1Candidates.length} total`);
+
+  // Log rejection reasons summary
+  const reasons: Record<string, number> = {};
+  for (const r of rejected) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
+  console.log(`[scout] Rejection reasons: ${Object.entries(reasons).map(([k,v]) => `${k}=${v}`).join(', ')}`);
+
+  if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length };
+
+  // Shuffle passed candidates — get variety across runs
+  // Then take up to MAX_PROFILE_LOOKUPS for Phase 2 enrichment
+  const toEnrich = passed
+    .map(r => r.candidate.username)
+    .sort(() => Math.random() - 0.5)
+    .slice(0, MAX_PROFILE_LOOKUPS);
+
+  console.log(`[scout] Phase 2: enriching ${toEnrich.length} pre-filtered profiles (${passed.length - toEnrich.length} passed but not enriched this run)`);
 
   let profiles: EnrichedProfile[] = [];
   try {
-    profiles = await enrichProfiles(newHandles);
+    profiles = await enrichProfiles(toEnrich);
   } catch (err) {
     return { found: 0, skipped: 0, refusalReason: `Phase 2 error: ${err}` };
   }
@@ -511,7 +627,7 @@ export async function runScout(pool: Pool): Promise<{
     WHERE date = $3
   `, [inserted, JSON.stringify(insertedHandles), today]);
 
-  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${rawHandles.length} raw`);
+  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${toEnrich.length} to enrich / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
   return { found: inserted, skipped: profiles.length - inserted };
 }
 
