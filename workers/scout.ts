@@ -409,6 +409,8 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
         taggedUsers?: Array<{ username?: string }>;
         locationName?: string;
         coauthorProducers?: Array<{ username?: string }>;
+        // Explicitly NOT capturing: firstComment, latestComments, ownerUsername
+        // Comment authors are NOT collaborators and must never reach the analyst
       }>;
     };
 
@@ -423,6 +425,8 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
       const tagged = [
         ...(post.taggedUsers ?? []).map(u => u.username ?? ''),
         ...(post.coauthorProducers ?? []).map(u => u.username ?? ''),
+        // NOTE: latestComments and firstComment are intentionally excluded
+        // Comment authors are NOT business partners and must not appear in collabSignals
       ].filter(Boolean).filter(u => !PERMANENT_EXCLUSIONS.has(u));
 
       return {
