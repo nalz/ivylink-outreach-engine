@@ -155,7 +155,7 @@ Use the safe fallback styles (A3/A5 for Track A, B2/B3 for Track B) when data is
 COMMENT AUTHORS ARE NOT COLLABORATORS:
 The structured_posts data may contain caption text that mentions comments or commenters.
 A person who commented "Let's go!" or "Congratulations!" on a post is NOT a business partner.
-Only accounts in the `tagged` field of structured_posts are potential collaborators.
+Only accounts in the "tagged" field of structured_posts are potential collaborators.
 Never reference a username that appears only in comment text as a collaborator or partner.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
