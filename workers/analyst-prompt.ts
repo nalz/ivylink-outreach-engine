@@ -198,19 +198,28 @@ Style B4 — Growth signal (use when they signal expansion or hiring):
 STORY REPLY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Write actual suggested text — not a placeholder.
-Stories are not scraped so base this on bio + most recent caption.
-Frame it as reacting to something they might plausibly have in their stories.
+This is a PRIVATE reply to one of their Instagram stories. It should feel like a genuine human reaction — something you would actually send if you just watched their story.
 
-Track A examples:
-- "Do you coordinate the partner collabs through your main account or handle those separately?"
-- "The before/after content — is that all shot in-house or do you work with a photographer?"
+Rules:
+- React to what they might plausibly post in a story based on their bio and recent captions
+- Keep it warm and conversational — this is private, not public
+- No business language, no mention of collabs, partnerships, conversion, ROI
+- No generic openers like "love this" or "so cool"
+- 1 sentence max
+- Should feel spontaneous — like you actually watched the story and had a reaction
 
-Track B examples:
-- "Do most of your bookings come through the link in bio or direct DM?"
-- "Is the [treatment from bio/caption] your main volume driver right now or more of a specialty service?"
+Examples of the RIGHT tone:
+- For a spa posting treatment content: "The glow on that result is so satisfying to see"
+- For someone posting a before/after: "The texture difference is wild, what did you use?"
+- For someone posting about a new treatment they're offering: "Haven't seen this done locally before, how are clients responding to it?"
+- For someone posting a behind-the-scenes: "Never thought about how much prep goes into this kind of treatment"
+- For someone at an event or expo: "That looks like such a good crowd"
 
-Keep it 1 sentence. Make it feel like a real human reaction from someone who looked at their content.
+Examples of the WRONG tone (do not do these):
+- "Do you coordinate the expo partner collabs through your main account or handle those through the individual businesses?" — sounds like a sales call
+- "Do you track what revenue this drives?" — business inquiry
+- "How does this fit into your broader partnership strategy?" — too formal
+- Anything that sounds like you're researching them for outreach
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 POST COMMENT
