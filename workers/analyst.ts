@@ -18,7 +18,7 @@ const client = new Anthropic({
 });
 
 const MODEL = 'claude-sonnet-4-5';
-const MAX_PROSPECTS_PER_RUN = 15; // Process a full scout batch in one run
+const MAX_PROSPECTS_PER_RUN = 30; // handle a full scout batch in one run
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

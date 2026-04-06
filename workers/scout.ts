@@ -26,9 +26,8 @@ const APIFY_TOKEN   = process.env.APIFY_TOKEN!;
 const APIFY_ACTOR   = 'apify~instagram-scraper';
 const APIFY_BASE    = 'https://api.apify.com/v2';
 
-const MAX_PER_RUN         = 10;
-const MAX_PROFILE_LOOKUPS = 80;  // raised from 40 — covers more of the 200 raw handles
-const DAILY_LIMIT         = 40;
+const MAX_PROFILE_LOOKUPS = 80;  // handles to enrich in Phase 2
+const DAILY_LIMIT         = 60;  // raised — more headroom as quality improves
 const MIN_GAP_MINUTES     = 25;
 
 // ── Permanent exclusion list ──────────────────────────────────────────────────
@@ -553,7 +552,6 @@ export async function runScout(pool: Pool): Promise<{
   const qualified: Array<EnrichedProfile & { track: 'A'|'B' }> = [];
 
   for (const profile of profiles) {
-    if (qualified.length >= MAX_PER_RUN) break;
     if (knownHandles.has(profile.username)) continue;
 
     // Minimum post activity — inactive accounts aren't worth reaching out to
