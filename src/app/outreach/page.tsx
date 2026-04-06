@@ -44,6 +44,7 @@ interface Prospect {
   dm_variant_3_style: string | null;
   story_reply: string | null;
   post_comment: string | null;
+  notes: string | null;
   // follow-up specific
   follow_up_dm?: string | null;
   dm_sent_at?: string | null;
@@ -473,7 +474,34 @@ function ProspectCard({
             : <div style={{ fontSize: 12, color: C.textDim, marginBottom: 8, padding: '8px 12px', background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>No story reply generated — rerun analyst to regenerate copy.</div>
           }
           {prospect.post_comment
-            ? <CopyBlock text={prospect.post_comment} label="Post Comment — leave on their most recent post" />
+            ? (
+              <div>
+                <CopyBlock text={prospect.post_comment} label="Post Comment — leave on their most recent post" />
+                {(() => {
+                  try {
+                    const notes = JSON.parse(prospect.notes ?? '{}') as { structured_posts?: Array<{ url?: string; days_ago?: number; type?: string }> };
+                    const post = notes.structured_posts?.[0];
+                    if (post?.url) {
+                      return (
+                        <a
+                          href={post.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            fontSize: 11, color: C.coral, textDecoration: 'none',
+                            marginTop: -4, marginBottom: 12,
+                          }}
+                        >
+                          ↗ Open post ({post.type ?? 'post'}, {post.days_ago ?? '?'}d ago)
+                        </a>
+                      );
+                    }
+                  } catch { /* notes not JSON */ }
+                  return null;
+                })()}
+              </div>
+            )
             : <div style={{ fontSize: 12, color: C.textDim, marginBottom: 8, padding: '8px 12px', background: C.bg, borderRadius: 6, border: `1px solid ${C.border}` }}>No post comment generated — rerun analyst to regenerate copy.</div>
           }
 

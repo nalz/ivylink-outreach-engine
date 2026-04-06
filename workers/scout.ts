@@ -391,7 +391,7 @@ interface EnrichedProfile {
   hasBookingLink: boolean; usesStories: boolean;
   recentPosts: Array<{
     type: 'reel'|'photo'|'carousel'; daysAgo: number;
-    captionSnippet: string; tagged: string[];
+    url: string; captionSnippet: string; tagged: string[];
     location: string; hashtags: string[];
   }>;
   recentCaptions: string[];
@@ -423,6 +423,7 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
       latestPosts?: Array<{
         type?: string; timestamp?: string; caption?: string;
         hashtags?: string[];
+        url?: string; shortCode?: string;
         taggedUsers?: Array<{ username?: string }>;
         locationName?: string;
         coauthorProducers?: Array<{ username?: string }>;
@@ -449,6 +450,7 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
       return {
         type: type as 'reel'|'photo'|'carousel',
         daysAgo,
+        url: post.url ?? (post.shortCode ? `https://instagram.com/p/${post.shortCode}/` : ''),
         captionSnippet: sanitize((post.caption ?? '').slice(0, 280)),
         tagged,
         location: sanitize(post.locationName ?? ''),
@@ -604,7 +606,9 @@ export async function runScout(pool: Pool): Promise<{
 
   for (const p of qualified) {
     const structuredPosts = p.recentPosts.map(post => ({
-      type: post.type, days_ago: post.daysAgo, caption: post.captionSnippet,
+      type: post.type, days_ago: post.daysAgo,
+      url: post.url,
+      caption: post.captionSnippet,
       tagged: post.tagged, location: post.location, hashtags: post.hashtags,
     }));
 
