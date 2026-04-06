@@ -204,6 +204,10 @@ export async function runAnalyst(pool: Pool): Promise<{
       const safeEngage   = clamp(sb.engagement_quality, 0, 10);
       const safeBrand    = clamp(sb.brand_fit,          0, 10);
 
+      // Analyst never rejects — scout already qualified these accounts.
+      // If Claude returns "rejected", override to "scored" so it shows in hold queue.
+      const safeStatus = result.status === 'rejected' ? 'scored' : result.status;
+
       // Persist score and enrichment
       await pool.query(`
         UPDATE prospects SET
@@ -230,7 +234,7 @@ export async function runAnalyst(pool: Pool): Promise<{
           updated_at = NOW()
         WHERE id = $21
       `, [
-        result.status,
+        safeStatus,
         safeScore,
         safeCollab,
         safeLocal,
@@ -256,8 +260,8 @@ export async function runAnalyst(pool: Pool): Promise<{
       stats.enriched++;
       stats.scored++;
 
-      // Persist content for any non-rejected prospect that has at least some copy
-      const hasContent = result.status !== 'rejected' && (
+      // Always persist content — analyst never rejects, every prospect gets copy
+      const hasContent = (
         result.content.dm_variant_1 ||
         result.content.story_reply ||
         result.content.post_comment
@@ -322,7 +326,7 @@ export async function runAnalyst(pool: Pool): Promise<{
         JSON.stringify({ score: result.score, priority: result.priority }),
       ]);
 
-      console.log(`[analyst] @${p.handle} → ${result.score} pts (${result.status}) Track ${result.collab_track ?? track}`);
+      console.log(`[analyst] @${p.handle} → ${safeScore} pts (${safeStatus}) Track ${result.collab_track ?? track}`);
 
       // Polite delay between Claude calls
       await sleep(1500);

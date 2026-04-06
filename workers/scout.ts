@@ -92,9 +92,23 @@ const OWNER_SIGNALS = [
 ];
 
 const EMPLOYEE_PATTERNS = [
-  /aesthetician\s+@/i, /esthetician\s+@/i, /injector\s+@/i,
-  /provider\s+@/i, /specialist\s+@/i, /expert\s+@/i,
-  /at\s+@\w+/i, /\|\s*@\w+\s*(medspa|spa|clinic|aesthetics)/i,
+  // "aesthetician @place" or "esthetician at @place"
+  /aesthetician\s+@/i,
+  /esthetician\s+@/i,
+  /injector\s+@/i,
+  /provider\s+@/i,
+  /specialist\s+@/i,
+  /expert\s+@/i,
+  /artist\s+@/i,
+  // "at @place" or "| @place"
+  /\bat\s+@\w{3,}/i,
+  /\|\s*@\w+(medspa|spa|clinic|aesthetics|beauty|studio)/i,
+  // "working at" or "based at"
+  /working\s+at\s+@/i,
+  /based\s+at\s+@/i,
+  // "team member of" or "proud member"
+  /team\s+(member|of)\s+@/i,
+  /proud\s+(member|part)\s+of\s+@/i,
 ];
 
 const ICP_KEYWORDS = [
@@ -425,6 +439,19 @@ export async function runScout(pool: Pool): Promise<{
   for (const profile of profiles) {
     if (qualified.length >= MAX_PER_RUN) break;
     if (knownHandles.has(profile.username)) continue;
+
+    // Minimum post activity — inactive accounts aren't worth reaching out to
+    if (profile.postsCount < 9) {
+      console.log(`[scout] Skip @${profile.username}: too few posts (${profile.postsCount})`);
+      continue;
+    }
+    // Must have posted recently — check if any post is within 30 days
+    const hasRecentPost = profile.recentPosts.some(p => p.daysAgo <= 30);
+    if (!hasRecentPost && profile.recentPosts.length > 0) {
+      console.log(`[scout] Skip @${profile.username}: no posts in last 30 days`);
+      continue;
+    }
+
     const { qualified: isQ, reason } = isOwner({
       username: profile.username, biography: profile.biography,
       displayName: profile.displayName, followersCount: profile.followersCount,

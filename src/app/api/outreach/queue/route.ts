@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     // Use pool (pg) instead of neon serverless sql tag — more reliable for views
-    const [readyRes, followUpRes, healthRes] = await Promise.all([
+    const [readyRes, holdRes, followUpRes, healthRes] = await Promise.all([
       pool.query(`
         SELECT p.*,
           pc.dm_variant_1, pc.dm_variant_1_style,
@@ -22,6 +22,18 @@ export async function GET() {
         FROM prospects p
         LEFT JOIN prospect_content pc ON pc.prospect_id = p.id
         WHERE p.status = 'ready'
+        ORDER BY p.score DESC, p.discovered_at ASC
+      `),
+      pool.query(`
+        SELECT p.*,
+          pc.dm_variant_1, pc.dm_variant_1_style,
+          pc.dm_variant_2, pc.dm_variant_2_style,
+          pc.dm_variant_3, pc.dm_variant_3_style,
+          pc.story_reply, pc.post_comment,
+          pc.generated_at AS content_generated_at
+        FROM prospects p
+        LEFT JOIN prospect_content pc ON pc.prospect_id = p.id
+        WHERE p.status = 'scored'
         ORDER BY p.score DESC, p.discovered_at ASC
       `),
       pool.query(`
@@ -53,10 +65,11 @@ export async function GET() {
       `),
     ]);
 
-    console.log(`[api/queue] ready=${readyRes.rows.length} followUp=${followUpRes.rows.length} health=${JSON.stringify(healthRes.rows[0])}`);
+    console.log(`[api/queue] ready=${readyRes.rows.length} hold=${holdRes.rows.length} followUp=${followUpRes.rows.length} health=${JSON.stringify(healthRes.rows[0])}`);
 
     return NextResponse.json({
       ready: readyRes.rows,
+      hold: holdRes.rows,
       followUp: followUpRes.rows,
       health: healthRes.rows[0] ?? {},
     });

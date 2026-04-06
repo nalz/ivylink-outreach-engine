@@ -61,7 +61,7 @@ interface PipelineHealth {
   total: number;
 }
 
-type Tab = 'ready' | 'followup';
+type Tab = 'ready' | 'hold' | 'followup';
 
 // ── Color tokens ──────────────────────────────────────────────────────────────
 
@@ -655,6 +655,7 @@ function HealthBar({ health }: { health: PipelineHealth }) {
 export default function OutreachPage() {
   const [tab, setTab] = useState<Tab>('ready');
   const [ready, setReady] = useState<Prospect[]>([]);
+  const [hold, setHold] = useState<Prospect[]>([]);
   const [followUp, setFollowUp] = useState<Prospect[]>([]);
   const [health, setHealth] = useState<PipelineHealth | null>(null);
   const [loading, setLoading] = useState(true);
@@ -665,8 +666,9 @@ export default function OutreachPage() {
   const loadQueue = useCallback(async () => {
     try {
       const res = await fetch('/api/outreach/queue', { cache: 'no-store' });
-      const data = await res.json() as { ready: Prospect[]; followUp: Prospect[]; health: PipelineHealth };
+      const data = await res.json() as { ready: Prospect[]; hold: Prospect[]; followUp: Prospect[]; health: PipelineHealth };
       setReady(data.ready ?? []);
+      setHold(data.hold ?? []);
       setFollowUp(data.followUp ?? []);
       setHealth(data.health);
       setLastRefresh(new Date());
@@ -866,6 +868,7 @@ export default function OutreachPage() {
         }}>
           {([
             { key: 'ready', label: 'Ready to Message', count: ready.length },
+            { key: 'hold', label: 'Hold Queue', count: hold.length },
             { key: 'followup', label: 'Follow-ups', count: followUp.length },
           ] as const).map((t) => (
             <button
@@ -932,6 +935,46 @@ export default function OutreachPage() {
                 </div>
                 {ready.map((p) => (
                   <ProspectCard key={p.id} prospect={p} onUpdate={handleUpdate} />
+                ))}
+              </>
+            )}
+          </>
+        )}
+
+        {/* Hold queue */}
+        {!loading && tab === 'hold' && (
+          <>
+            {hold.length === 0 ? (
+              <div style={{
+                textAlign: 'center', padding: '60px 0',
+                background: C.surface, border: `1px solid ${C.border}`,
+                borderRadius: 12,
+              }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>📋</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 6 }}>
+                  No prospects on hold
+                </div>
+                <div style={{ fontSize: 13, color: C.textMuted }}>
+                  Scored but not ready — below the threshold for outreach.
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 12 }}>
+                  {hold.length} prospect{hold.length !== 1 ? 's' : ''} scored but below ready threshold — review and promote manually if you want to message them
+                </div>
+                {hold.map((p) => (
+                  <div key={p.id} style={{ position: 'relative' }}>
+                    <div style={{
+                      position: 'absolute', top: 12, right: 12, zIndex: 1,
+                      padding: '3px 8px', background: C.amber + '22',
+                      border: `1px solid ${C.amber}44`, borderRadius: 4,
+                      fontSize: 10, fontWeight: 700, color: C.amber, letterSpacing: '0.06em',
+                    }}>
+                      HOLD
+                    </div>
+                    <ProspectCard key={p.id} prospect={p} onUpdate={handleUpdate} />
+                  </div>
                 ))}
               </>
             )}
