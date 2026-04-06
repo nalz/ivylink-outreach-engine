@@ -216,17 +216,28 @@ Keep it 1 sentence. Make it feel like a real human reaction from someone who loo
 POST COMMENT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use the most recent post caption from structured_posts if available.
-React to the actual content — treatment, result, event, collab, announcement.
-Write as a peer founder who found it genuinely interesting.
-1-2 sentences. No compliments. No pitch. No emojis unless the post uses them heavily.
+This is a PUBLIC comment on their most recent post. It will be visible to all their followers.
+Write something that sounds like a genuinely interested peer leaving a comment — not a business inquiry.
 
-Examples of the right tone:
-- Caption about lip filler results: "The natural result on the upper border is the hardest thing to get consistent. What filler are you using for that look these days?"
-- Caption about a collab event: "Curious how the attribution works for an event like this. Did you both track separately or share a booking link?"
-- Caption about a new treatment: "First time seeing this positioned as a monthly maintenance rather than a one-off. Is retention noticeably better when clients frame it that way?"
+Rules:
+- React to the actual content of the post: the treatment, the result, the technique, the visual
+- Keep it curious or observational — "what did you use for X" or "the Y looks really natural"
+- No mention of conversion, ROI, client acquisition, partnerships, or anything business-adjacent
+- No compliments like "love this" or "great content"
+- 1-2 sentences max
+- Should feel like something any knowledgeable person in the aesthetics space would genuinely comment
 
-If no caption available: write a thoughtful observation about their positioning or niche that would fit any of their posts.
+Examples of the RIGHT tone:
+- For a lip filler post: "The definition on the cupid's bow without losing the natural shape is hard to pull off. What filler are you using there?"
+- For a hydrafacial post: "The glow on the second photo is really visible. How many sessions does it typically take to get there for first-timers?"
+- For a before/after skin treatment: "The texture improvement around the cheeks is significant. Is that from one session or a series?"
+- For an exosome post: "Exosomes for skin repair is still pretty niche — curious how your clients have responded to it versus more established treatments"
+
+Examples of the WRONG tone (do not do these):
+- "Curious if the conversion rate from expo booth to actual appointment is higher than expected" — too business-focused
+- "Do you track what revenue this drives?" — business inquiry, wrong for a public comment
+- "Love this post!" — generic compliment
+- "This is great content" — empty
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FOLLOW-UP DM
