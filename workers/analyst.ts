@@ -183,7 +183,15 @@ export async function runAnalyst(pool: Pool): Promise<{
             // Keep posts with at least some caption content
             if (caption.trim().length < 20) return false;
             return true;
-          });
+          }).map(post => ({
+            type: post.type ?? '',
+            days_ago: post.days_ago ?? 0,
+            caption: post.caption ?? '',
+            url: post.url ?? '',
+            tagged: post.tagged ?? [],
+            location: post.location ?? '',
+            hashtags: post.hashtags ?? [],
+          })) as ProspectProfileInput['structured_posts'];
 
           console.log(`[analyst] @${p.handle}: ${rawPosts.length} raw posts → ${structuredPosts.length} after filtering`);
         } catch {
