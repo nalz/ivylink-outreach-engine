@@ -193,7 +193,7 @@ export async function runAnalyst(pool: Pool): Promise<{
             hashtags: post.hashtags ?? [],
           })) as ProspectProfileInput['structured_posts'];
 
-          console.log(`[analyst] @${p.handle}: ${rawPosts.length} raw posts → ${structuredPosts.length} after filtering`);
+          console.log(`[analyst] @${p.handle}: ${rawPosts.length} raw posts → ${structuredPosts?.length ?? 0} after filtering`);
         } catch {
           // notes not JSON — default to Track B
         }
