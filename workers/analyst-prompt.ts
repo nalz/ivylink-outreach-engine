@@ -376,7 +376,7 @@ ${JSON.stringify({
 
 Apply the ${profile.collab_track === 'A' ? 'Track A (collab-active)' : 'Track B (collab-ready)'} scoring rubric.
 ${(profile.structured_posts ?? []).length > 0
-  ? `You have ${profile.structured_posts!.length} real posts to reference. Use specific details from structured_posts for DMs and the post comment.`
+  ? `You have ${(profile.structured_posts ?? []).length} real posts to reference for the post comment and DMs. STRICT RULE: The post comment must only describe what is LITERALLY written in the caption_snippet — the actual words present. Do not infer technique details, dosage, syringes, or clinical specifics that are not in the caption text. If a caption says "lip filler" you may react to that. If it does not specify technique or dosage, you may not invent those details. When in doubt, write a simpler observational comment or return null.`
   : `No post data available. Use safe fallback DM styles (A3/A5 for Track A, B2/B3 for Track B). Do not invent post references.`
 }
 Return only the JSON response.`;
