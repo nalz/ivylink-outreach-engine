@@ -18,6 +18,7 @@ export async function GET() {
           pc.dm_variant_2, pc.dm_variant_2_style,
           pc.dm_variant_3, pc.dm_variant_3_style,
           pc.story_reply, pc.post_comment,
+          pc.generation_notes,
           pc.generated_at AS content_generated_at
         FROM prospects p
         LEFT JOIN prospect_content pc ON pc.prospect_id = p.id
@@ -30,6 +31,7 @@ export async function GET() {
           pc.dm_variant_2, pc.dm_variant_2_style,
           pc.dm_variant_3, pc.dm_variant_3_style,
           pc.story_reply, pc.post_comment,
+          pc.generation_notes,
           pc.generated_at AS content_generated_at
         FROM prospects p
         LEFT JOIN prospect_content pc ON pc.prospect_id = p.id

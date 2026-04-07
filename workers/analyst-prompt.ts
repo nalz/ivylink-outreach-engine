@@ -315,6 +315,7 @@ All score integers must be ≥ 0. Never negative.
     "dm_variant_3_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4" | null,
     "story_reply": "<actual suggested text, 1 sentence>",
     "post_comment": "<actual suggested text based on most recent caption>",
+    "post_comment_url": "<the url field from whichever structured_post you used for the comment, or null>",
     "follow_up_dm": "<text>",
     "follow_up_style": "easy_question" | "fresh_observation",
     "generation_notes": "<which specific data points were used for DMs and comment>"

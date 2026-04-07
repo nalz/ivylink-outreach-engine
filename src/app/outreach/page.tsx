@@ -44,6 +44,7 @@ interface Prospect {
   dm_variant_3_style: string | null;
   story_reply: string | null;
   post_comment: string | null;
+  generation_notes: string | null;
   notes: string | null;
   // follow-up specific
   follow_up_dm?: string | null;
@@ -479,12 +480,13 @@ function ProspectCard({
                 <CopyBlock text={prospect.post_comment} label="Post Comment — leave on their most recent post" />
                 {(() => {
                   try {
-                    const notes = JSON.parse(prospect.notes ?? '{}') as { structured_posts?: Array<{ url?: string; days_ago?: number; type?: string }> };
-                    const post = notes.structured_posts?.[0];
-                    if (post?.url) {
+                    // Use the URL of the exact post Claude commented on (stored in generation_notes)
+                    const genNotes = JSON.parse(prospect.generation_notes ?? '{}') as { post_comment_url?: string; notes?: string };
+                    const postUrl = genNotes.post_comment_url;
+                    if (postUrl) {
                       return (
                         <a
-                          href={post.url}
+                          href={postUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{
@@ -493,11 +495,22 @@ function ProspectCard({
                             marginTop: -4, marginBottom: 12,
                           }}
                         >
-                          ↗ Open post ({post.type ?? 'post'}, {post.days_ago ?? '?'}d ago)
+                          ↗ Open post to comment on
                         </a>
                       );
                     }
-                  } catch { /* notes not JSON */ }
+                    // Fallback: show first structured post if no specific URL
+                    const notes = JSON.parse(prospect.notes ?? '{}') as { structured_posts?: Array<{ url?: string; type?: string }> };
+                    const firstPost = notes.structured_posts?.[0];
+                    if (firstPost?.url) {
+                      return (
+                        <a href={firstPost.url} target="_blank" rel="noopener noreferrer"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: C.textDim, textDecoration: 'none', marginTop: -4, marginBottom: 12 }}>
+                          ↗ Open most recent post
+                        </a>
+                      );
+                    }
+                  } catch { /* ignore */ }
                   return null;
                 })()}
               </div>

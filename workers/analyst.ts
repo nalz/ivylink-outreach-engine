@@ -58,6 +58,7 @@ interface AnalystResult {
     dm_variant_3_style: string | null;
     story_reply: string | null;
     post_comment: string | null;
+    post_comment_url: string | null;
     follow_up_dm: string | null;
     follow_up_style: string | null;
     generation_notes: string | null;
@@ -158,7 +159,33 @@ export async function runAnalyst(pool: Pool): Promise<{
         try {
           const notes = JSON.parse(p.notes) as { track?: string; structured_posts?: unknown[] };
           track = notes.track === 'A' ? 'A' : 'B';
-          structuredPosts = (notes.structured_posts ?? []) as ProspectProfileInput['structured_posts'];
+          const rawPosts = (notes.structured_posts ?? []) as Array<{
+            days_ago?: number; caption?: string; type?: string; url?: string;
+            tagged?: string[]; location?: string; hashtags?: string[];
+          }>;
+
+          // Code-level filter — strip posts that would cause hallucination
+          // before they ever reach Claude. Prompt rules alone are not reliable enough.
+          const genericPhrases = [
+            'meet the founder', 'meet the team', 'introducing ourselves',
+            'heart and soul', 'our mission', 'our goal', 'our belief',
+            're-introducing', 'building something', 'who we are',
+            'card on file', 'no-show', 'cancellation policy',
+            'we are hiring', 'now hiring', 'job opening',
+          ];
+
+          structuredPosts = rawPosts.filter(post => {
+            // Remove posts older than 90 days (pinned or not — too stale for comments)
+            if ((post.days_ago ?? 999) > 90) return false;
+            // Remove posts with clearly generic/non-treatment captions
+            const caption = (post.caption ?? '').toLowerCase();
+            if (genericPhrases.some(phrase => caption.includes(phrase))) return false;
+            // Keep posts with at least some caption content
+            if (caption.trim().length < 20) return false;
+            return true;
+          });
+
+          console.log(`[analyst] @${p.handle}: ${rawPosts.length} raw posts → ${structuredPosts.length} after filtering`);
         } catch {
           // notes not JSON — default to Track B
         }
@@ -270,6 +297,11 @@ export async function runAnalyst(pool: Pool): Promise<{
       if (hasContent) {
         // Truncate style codes — schema expects short strings, Claude returns e.g. "A3", "B2"
         const s = (v: string | null) => v ? v.slice(0, 10) : null;
+        // Store post_comment_url in generation_notes so UI can link to correct post
+        const generationNotes = JSON.stringify({
+          notes: result.content.generation_notes,
+          post_comment_url: result.content.post_comment_url ?? null,
+        });
         await pool.query(`
           INSERT INTO prospect_content (
             prospect_id,
@@ -307,7 +339,7 @@ export async function runAnalyst(pool: Pool): Promise<{
           result.content.follow_up_dm,
           s(result.content.follow_up_style),
           MODEL,
-          result.content.generation_notes,
+          generationNotes,
         ]);
 
         stats.dmsGenerated++;
