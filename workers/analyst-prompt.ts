@@ -234,25 +234,26 @@ POST COMMENT
 This is a PUBLIC comment on their most recent post. It will be visible to all their followers.
 Write something that sounds like a genuinely interested peer leaving a comment — not a business inquiry.
 
+ABSOLUTE RULE: You can ONLY comment on treatments, techniques, or results that appear WORD FOR WORD in the caption text provided. If the caption does not contain the word "botox", you cannot comment about botox. If the caption does not contain the word "filler", "lip", or "cupid's bow", you cannot comment about lips. If the caption does not mention a specific procedure, you cannot invent one. This rule has no exceptions.
+
+If the caption is generic — an intro post, meet the team, mission statement, contact info, event announcement, or inspirational quote — set post_comment to NULL. Do not write anything. It is far better to leave it blank than to fabricate treatment details.
+
 Rules:
-- React to the actual content of the post: the treatment, the result, the technique, the visual
-- Keep it curious or observational — "what did you use for X" or "the Y looks really natural"
+- The caption must contain a specific treatment, result, or technique for you to comment on
+- React only to what is literally written in the caption_snippet
 - No mention of conversion, ROI, client acquisition, partnerships, or anything business-adjacent
 - No compliments like "love this" or "great content"
 - 1-2 sentences max
-- Should feel like something any knowledgeable person in the aesthetics space would genuinely comment
 
-Examples of the RIGHT tone:
-- For a lip filler post: "The definition on the cupid's bow without losing the natural shape is hard to pull off. What filler are you using there?"
-- For a hydrafacial post: "The glow on the second photo is really visible. How many sessions does it typically take to get there for first-timers?"
-- For a before/after skin treatment: "The texture improvement around the cheeks is significant. Is that from one session or a series?"
-- For an exosome post: "Exosomes for skin repair is still pretty niche — curious how your clients have responded to it versus more established treatments"
+Examples of the RIGHT tone (only when the caption literally mentions these):
+- Caption says "hydrafacial" → comment on hydrafacial
+- Caption says "exosomes" → comment on exosomes
+- Caption says "before and after microneedling" → comment on microneedling
 
-Examples of the WRONG tone (do not do these):
-- "Curious if the conversion rate from expo booth to actual appointment is higher than expected" — too business-focused
-- "Do you track what revenue this drives?" — business inquiry, wrong for a public comment
-- "Love this post!" — generic compliment
-- "This is great content" — empty
+Examples of when to return null:
+- Caption says "meet the founder, personalized skin care, feel confident" → NULL (no specific treatment)
+- Caption says "come see us at the expo" → NULL (event announcement)
+- Caption says "call to book, we offer botox and fillers" → NULL (too generic, no clinical content to react to)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FOLLOW-UP DM

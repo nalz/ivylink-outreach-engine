@@ -435,28 +435,31 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
     const now = Date.now();
     const posts = p.latestPosts ?? [];
 
-    const recentPosts = posts.slice(0, 6).map(post => {
-      const ts = post.timestamp ? new Date(post.timestamp).getTime() : now;
-      const daysAgo = Math.round((now - ts) / 86_400_000);
-      const type = (post.type ?? '').toLowerCase().includes('reel') ? 'reel'
-        : (post.type ?? '').toLowerCase().includes('carousel') ? 'carousel' : 'photo';
-      const tagged = [
-        ...(post.taggedUsers ?? []).map(u => u.username ?? ''),
-        ...(post.coauthorProducers ?? []).map(u => u.username ?? ''),
-        // NOTE: latestComments and firstComment are intentionally excluded
-        // Comment authors are NOT business partners and must not appear in collabSignals
-      ].filter(Boolean).filter(u => !PERMANENT_EXCLUSIONS.has(u));
+    const recentPosts = posts
+      .slice(0, 6)
+      .map(post => {
+        const ts = post.timestamp ? new Date(post.timestamp).getTime() : now;
+        const daysAgo = Math.round((now - ts) / 86_400_000);
+        const type = (post.type ?? '').toLowerCase().includes('reel') ? 'reel'
+          : (post.type ?? '').toLowerCase().includes('carousel') ? 'carousel' : 'photo';
+        const tagged = [
+          ...(post.taggedUsers ?? []).map(u => u.username ?? ''),
+          ...(post.coauthorProducers ?? []).map(u => u.username ?? ''),
+          // NOTE: latestComments and firstComment are intentionally excluded
+          // Comment authors are NOT business partners and must not appear in collabSignals
+        ].filter(Boolean).filter(u => !PERMANENT_EXCLUSIONS.has(u));
 
-      return {
-        type: type as 'reel'|'photo'|'carousel',
-        daysAgo,
-        url: post.url ?? (post.shortCode ? `https://instagram.com/p/${post.shortCode}/` : ''),
-        captionSnippet: sanitize((post.caption ?? '').slice(0, 280)),
-        tagged,
-        location: sanitize(post.locationName ?? ''),
-        hashtags: (post.hashtags ?? []).slice(0, 8),
-      };
-    });
+        return {
+          type: type as 'reel'|'photo'|'carousel',
+          daysAgo,
+          url: post.url ?? (post.shortCode ? `https://instagram.com/p/${post.shortCode}/` : ''),
+          captionSnippet: sanitize((post.caption ?? '').slice(0, 280)),
+          tagged,
+          location: sanitize(post.locationName ?? ''),
+          hashtags: (post.hashtags ?? []).slice(0, 8),
+        };
+      })
+      .filter(post => post.daysAgo <= 60); // Only include posts from last 60 days
 
     const recentCaptions = recentPosts.map(p => p.captionSnippet).filter(Boolean);
     const collabSignals = [...new Set(recentPosts.flatMap(p => p.tagged))].slice(0, 8);
