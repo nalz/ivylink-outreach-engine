@@ -41,12 +41,17 @@ const PERMANENT_EXCLUSIONS = new Set([
   'clinicgrower','medspaalliance','aestheticrecord',
 ]);
 
-// ── Hashtag groups (run in parallel) ─────────────────────────────────────────
+// ── Hashtag groups ────────────────────────────────────────────────────────────
+//
+// TRACK B groups: credential/geo/treatment combos — finds owners in the ICP
+// but does NOT filter for collab intent. classifyTrack() assigns A/B after enrichment.
+// These are the original groups and remain the default for Track B discovery runs.
+//
+// TRACK A groups: intent-first — searches for partner/collab language directly.
+// Surfaces accounts actively signaling cross-business partnerships right now.
+// Lower volume, much higher collab-signal density. Use for Track A targeted runs.
 
-// Geo + treatment combos = almost always actual providers posting their own work.
-// Business/marketing hashtags (#medspabusiness, #medspamarketing) are dropped —
-// they attract vendors and consultants who sell TO med spas, not owners.
-const HASHTAG_GROUPS = [
+const TRACK_B_HASHTAG_GROUPS = [
   // NJ city-level — highest signal, almost exclusively local providers
   ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
    '#princetonmedspa','#morristownmedspa','#newjerseymedspa','#njmedspa','#njbotox','#njfiller'],
@@ -61,6 +66,34 @@ const HASHTAG_GROUPS = [
   ['#nurseinjector','#aestheticnurse','#aestheticnp','#aestheticpa',
    '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
 ];
+
+// Track A: intent-first hashtags — partner/collab signals combined with geo/category anchors.
+// These tags are low-volume and high-signal: accounts posting under them are actively
+// demonstrating cross-business partnership behavior, not just existing in the ICP category.
+// Adjacent-category groups (gyms, salons, yoga studios) are included because they frequently
+// tag or are tagged by med spa owners doing local collabs.
+const TRACK_A_HASHTAG_GROUPS = [
+  // Explicit partner-intent tags — direct collab language
+  ['#localcollab','#businesscollab','#collabwithus','#localpartner',
+   '#referralpartner','#opentopartner','#crosspromotion','#communitypartner',
+   '#smallbizcollab','#partnerpost','#b2bcollab','#welovecollab'],
+  // Geo-anchored intent combos — NJ/NYC collab language with location signal
+  ['#collabnj','#collabnyc','#njbizcollab','#nyclocalbusiness',
+   '#hobokensmallbiz','#jerseycitylocal','#montclairlocal','#njwellness',
+   '#nycwellnessstudio','#brooklynsmallbiz','#nylashstudio'],
+  // Event/collab context — accounts mid-partnership or promoting joint events
+  ['#giveawaycollab','#popupshop','#openhouseevent','#guestspot',
+   '#collaborationpost','#collabreels','#giveawaypartner','#partnershiplaunch',
+   '#trunkshow','#wellnessevent'],
+  // Adjacent local businesses that collab with med spas — gyms, salons, boutiques, yoga
+  // These accounts tag and get tagged by aesthetic business owners doing cross-promotion
+  ['#njgym','#nyyogastudio','#njhairsalon','#njboutique','#njbridal',
+   '#personaltrainernj','#njchiropractor','#localgymnj','#njaesthetics',
+   '#njlaserstudio','#nycyoga','#nychairsalon'],
+];
+
+// Backward-compatible alias — keeps existing code paths that reference HASHTAG_GROUPS working
+const HASHTAG_GROUPS = TRACK_B_HASHTAG_GROUPS;
 
 // ── Geographic filter ─────────────────────────────────────────────────────────
 
@@ -274,11 +307,11 @@ interface Phase1Candidate {
   isPrivate: boolean;
 }
 
-async function getHandlesFromHashtags(): Promise<Phase1Candidate[]> {
-  console.log(`[scout] Phase 1: starting ${HASHTAG_GROUPS.length} parallel hashtag runs`);
+async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1Candidate[]> {
+  console.log(`[scout] Phase 1: starting ${hashtagGroups.length} parallel hashtag runs`);
 
   const runIds = await Promise.all(
-    HASHTAG_GROUPS.map(hashtags =>
+    hashtagGroups.map(hashtags =>
       startRun({
         directUrls: hashtags.map(h => `https://www.instagram.com/explore/tags/${h.replace('#','')}/`),
         resultsType: 'posts',
@@ -493,8 +526,13 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export async function runScout(pool: Pool): Promise<{
-  found: number; skipped: number; refusalReason?: string;
+// discoveryMode controls which hashtag strategy is used:
+//   'A' — intent-first groups: partner/collab language + adjacent categories
+//   'B' — category-first groups: credential/geo/treatment (original strategy)
+// classifyTrack() still runs on every enriched profile regardless of mode —
+// a Track B discovery run can still surface Track A prospects if their content warrants it.
+export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Promise<{
+  found: number; skipped: number; refusalReason?: string; discoveryMode: 'A' | 'B';
 }> {
   const today = new Date().toISOString().split('T')[0];
 
@@ -510,15 +548,19 @@ export async function runScout(pool: Pool): Promise<{
       const reason = `Gap check: ${Math.round(gapMin)}m ago (min ${MIN_GAP_MINUTES}m)`;
       console.log(`[scout] Refused: ${reason}`);
       await pool.query(`UPDATE scout_memory SET refused_runs = refused_runs + 1, updated_at = NOW() WHERE date = $1`, [today]);
-      return { found: 0, skipped: 0, refusalReason: reason };
+      return { found: 0, skipped: 0, refusalReason: reason, discoveryMode };
     }
   }
 
   if (memory.daily_discovery_count >= DAILY_LIMIT) {
-    return { found: 0, skipped: 0, refusalReason: `Daily limit ${memory.daily_discovery_count}/${DAILY_LIMIT}` };
+    return { found: 0, skipped: 0, refusalReason: `Daily limit ${memory.daily_discovery_count}/${DAILY_LIMIT}`, discoveryMode };
   }
 
   await pool.query(`UPDATE scout_memory SET last_run = NOW(), updated_at = NOW() WHERE date = $1`, [today]);
+
+  // Select hashtag strategy based on discovery mode
+  const activeHashtagGroups = discoveryMode === 'A' ? TRACK_A_HASHTAG_GROUPS : TRACK_B_HASHTAG_GROUPS;
+  console.log(`[scout] Discovery mode: Track ${discoveryMode} — ${activeHashtagGroups.length} hashtag groups`);
 
   const { rows: knownRows } = await pool.query<{ handle: string }>(`SELECT handle FROM prospects`);
   const knownHandles = new Set([
@@ -529,9 +571,9 @@ export async function runScout(pool: Pool): Promise<{
 
   let phase1Candidates: Phase1Candidate[] = [];
   try {
-    phase1Candidates = await getHandlesFromHashtags();
+    phase1Candidates = await getHandlesFromHashtags(activeHashtagGroups);
   } catch (err) {
-    return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}` };
+    return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}`, discoveryMode };
   }
 
   // ── Phase 1.5: Pre-filter all candidates using available Phase 1 data ─────────
@@ -568,7 +610,7 @@ export async function runScout(pool: Pool): Promise<{
   try {
     profiles = await enrichProfiles(toEnrich);
   } catch (err) {
-    return { found: 0, skipped: 0, refusalReason: `Phase 2 error: ${err}` };
+    return { found: 0, skipped: 0, refusalReason: `Phase 2 error: ${err}`, discoveryMode };
   }
 
   if (profiles.length > 0) {
@@ -626,7 +668,7 @@ export async function runScout(pool: Pool): Promise<{
     `, [
       p.username, sanitize(p.displayName), sanitize(p.biography),
       p.followersCount, p.followsCount, p.postsCount,
-      HASHTAG_GROUPS.flat().slice(0,3).join(', '),
+      `track_${discoveryMode}: ${activeHashtagGroups.flat().slice(0,3).join(', ')}`,
       p.hasBookingLink, p.usesStories,
       JSON.stringify(p.recentCaptions),
       JSON.stringify(p.collabSignals),
@@ -639,8 +681,8 @@ export async function runScout(pool: Pool): Promise<{
       inserted++;
       insertedHandles.push(p.username);
       await pool.query(`INSERT INTO activity_log (source, action, detail) VALUES ('scout','discovered',$1)`,
-        [`@${p.username} Track ${p.track} — ${p.followersCount} followers`]);
-      console.log(`[scout] Added @${p.username} Track ${p.track}`);
+        [`@${p.username} Track ${p.track} (scout mode: ${discoveryMode}) — ${p.followersCount} followers`]);
+      console.log(`[scout] Added @${p.username} Track ${p.track} (scout mode: ${discoveryMode})`);
     }
   }
 
@@ -653,8 +695,8 @@ export async function runScout(pool: Pool): Promise<{
     WHERE date = $3
   `, [inserted, JSON.stringify(insertedHandles), today]);
 
-  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${toEnrich.length} to enrich / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
-  return { found: inserted, skipped: profiles.length - inserted };
+  console.log(`[scout] Done (mode: Track ${discoveryMode}): ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${toEnrich.length} to enrich / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
+  return { found: inserted, skipped: profiles.length - inserted, discoveryMode };
 }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }

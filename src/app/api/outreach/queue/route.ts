@@ -1,82 +1,117 @@
 // ============================================================
-// src/app/api/outreach/queue/route.ts
-// GET /api/outreach/queue — Returns ready + follow-up queues
+// src/app/api/outreach/trigger/route.ts
+// POST /api/outreach/trigger?job=radar|analyst|scout
+// Manual trigger for testing without waiting for the cron.
+// Protected — requires the same admin session as the dashboard.
 // ============================================================
 
-import { NextResponse } from 'next/server';
-import { pool } from '@/lib/db';
+import { NextRequest, NextResponse } from 'next/server';
+import { Pool } from 'pg';
+import { getSessionFromRequest } from '@/lib/auth';
 
-export const dynamic = 'force-dynamic';
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 3,
+  idleTimeoutMillis: 30_000,
+});
 
-export async function GET() {
+export async function POST(req: NextRequest) {
+  // Auth check
+  const authenticated = await getSessionFromRequest(req);
+  if (!authenticated) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const job = req.nextUrl.searchParams.get('job') ?? 'radar';
+  const trackParam = req.nextUrl.searchParams.get('track');
+  const discoveryMode: 'A' | 'B' = trackParam === 'A' ? 'A' : 'B';
+
+  if (!['radar', 'analyst', 'scout'].includes(job)) {
+    return NextResponse.json(
+      { error: 'Invalid job. Use: radar | analyst | scout' },
+      { status: 400 }
+    );
+  }
+
   try {
-    // Use pool (pg) instead of neon serverless sql tag — more reliable for views
-    const [readyRes, holdRes, followUpRes, healthRes] = await Promise.all([
-      pool.query(`
-        SELECT p.*,
-          pc.dm_variant_1, pc.dm_variant_1_style,
-          pc.dm_variant_2, pc.dm_variant_2_style,
-          pc.dm_variant_3, pc.dm_variant_3_style,
-          pc.story_reply, pc.post_comment,
-          pc.generation_notes,
-          pc.generated_at AS content_generated_at
-        FROM prospects p
-        LEFT JOIN prospect_content pc ON pc.prospect_id = p.id
-        WHERE p.status = 'ready'
-        ORDER BY p.score DESC, p.discovered_at ASC
-      `),
-      pool.query(`
-        SELECT p.*,
-          pc.dm_variant_1, pc.dm_variant_1_style,
-          pc.dm_variant_2, pc.dm_variant_2_style,
-          pc.dm_variant_3, pc.dm_variant_3_style,
-          pc.story_reply, pc.post_comment,
-          pc.generation_notes,
-          pc.generated_at AS content_generated_at
-        FROM prospects p
-        LEFT JOIN prospect_content pc ON pc.prospect_id = p.id
-        WHERE p.status = 'scored'
-        ORDER BY p.score DESC, p.discovered_at ASC
-      `),
-      pool.query(`
-        SELECT p.*,
-          pc.follow_up_dm,
-          pc.sent_at AS dm_sent_at,
-          pc.follow_up_sent_at,
-          NOW() - pc.sent_at AS days_since_dm
-        FROM prospects p
-        JOIN prospect_content pc ON pc.prospect_id = p.id
-        WHERE p.status = 'messaged'
-          AND pc.sent_at IS NOT NULL
-          AND pc.sent_at < NOW() - INTERVAL '7 days'
-          AND pc.follow_up_sent_at IS NULL
-          AND pc.follow_up_dm IS NOT NULL
-        ORDER BY pc.sent_at ASC
-      `),
-      pool.query(`
-        SELECT
-          COUNT(*) FILTER (WHERE status = 'discovered') AS discovered,
-          COUNT(*) FILTER (WHERE status = 'enriched')   AS enriched,
-          COUNT(*) FILTER (WHERE status = 'scored')     AS scored,
-          COUNT(*) FILTER (WHERE status = 'ready')      AS ready,
-          COUNT(*) FILTER (WHERE status = 'messaged')   AS messaged,
-          COUNT(*) FILTER (WHERE status = 'skipped')    AS skipped,
-          COUNT(*) FILTER (WHERE status = 'rejected')   AS rejected,
-          COUNT(*) AS total
-        FROM prospects
-      `),
-    ]);
+    let result: Record<string, unknown> = {};
 
-    console.log(`[api/queue] ready=${readyRes.rows.length} hold=${holdRes.rows.length} followUp=${followUpRes.rows.length} health=${JSON.stringify(healthRes.rows[0])}`);
+    if (job === 'scout') {
+      const { runScout } = await import('@/../workers/scout');
+      result = await runScout(pool, discoveryMode);
+    }
 
-    return NextResponse.json({
-      ready: readyRes.rows,
-      hold: holdRes.rows,
-      followUp: followUpRes.rows,
-      health: healthRes.rows[0] ?? {},
-    });
+    if (job === 'analyst') {
+      const { runAnalyst } = await import('@/../workers/analyst');
+      result = await runAnalyst(pool);
+    }
+
+    if (job === 'radar') {
+      // Radar imports scout + analyst internally, so run inline here
+      // to keep it within the Next.js request lifecycle
+      const { runAnalyst } = await import('@/../workers/analyst');
+      const { runScout }   = await import('@/../workers/scout');
+
+      const today = new Date().toISOString().split('T')[0];
+
+      // Pipeline health
+      const healthRes = await pool.query(`SELECT * FROM v_pipeline_health`);
+      const h = healthRes.rows[0];
+
+      // Scout memory for gap check
+      const scoutMemRes = await pool.query(
+        `INSERT INTO scout_memory (date) VALUES ($1)
+         ON CONFLICT (date) DO UPDATE SET date = EXCLUDED.date RETURNING *`,
+        [today]
+      );
+      const sm = scoutMemRes.rows[0];
+
+      let action = 'idle';
+      let detail = '';
+      let analystStats = null;
+      let scoutStats   = null;
+
+      const needsAnalyst = h.enriched > 0 || h.discovered > 0;
+
+      if (needsAnalyst && h.ready < 3) {
+        action = 'analyst';
+        analystStats = await runAnalyst(pool);
+        detail = `scored=${analystStats.scored} dms=${analystStats.dmsGenerated} rejected=${analystStats.rejected}`;
+      } else if (h.ready >= 1) {
+        action = 'connect_prompt';
+        detail = `${h.ready} prospect(s) ready in dashboard`;
+      } else if (h.discovered < 5 && sm.daily_discovery_count < 20) {
+        action = 'scout';
+        scoutStats = await runScout(pool);
+        detail = scoutStats.refusalReason
+          ? `refused: ${scoutStats.refusalReason}`
+          : `found=${scoutStats.found}`;
+      } else {
+        detail = 'pipeline balanced';
+      }
+
+      // Update radar memory
+      await pool.query(
+        `INSERT INTO radar_memory (date, runs_today, last_action, last_run)
+         VALUES ($1, 1, $2, NOW())
+         ON CONFLICT (date) DO UPDATE SET
+           runs_today = radar_memory.runs_today + 1,
+           last_action = $2,
+           last_run = NOW(),
+           updated_at = NOW()`,
+        [today, action]
+      );
+
+      result = { action, detail, health: h, analystStats, scoutStats };
+    }
+
+    return NextResponse.json({ ok: true, job, result });
+
   } catch (err) {
-    console.error('[api/queue] Error:', err);
-    return NextResponse.json({ error: 'Failed to load queue', detail: String(err) }, { status: 500 });
+    console.error(`[trigger/${job}]`, err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
   }
 }
