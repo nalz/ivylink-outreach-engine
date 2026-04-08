@@ -67,29 +67,33 @@ const TRACK_B_HASHTAG_GROUPS = [
    '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
 ];
 
-// Track A: intent-first hashtags — partner/collab signals combined with geo/category anchors.
-// These tags are low-volume and high-signal: accounts posting under them are actively
-// demonstrating cross-business partnership behavior, not just existing in the ICP category.
-// Adjacent-category groups (gyms, salons, yoga studios) are included because they frequently
-// tag or are tagged by med spa owners doing local collabs.
+// Track A uses the same category-anchored hashtags as Track B to find med spa owners,
+// with a small set of aesthetics-specific collab tags added.
+//
+// KEY LESSON FROM PRODUCTION: Generic partner-intent hashtags (#localcollab,
+// #businesscollab, #smallbizcollab) pull in every type of small business — shipping
+// stores, coding events, gyms, hair salons. The ICP filter correctly rejects them
+// but wastes 80 Apify profile lookups per run.
+//
+// The Track A/B distinction is a CONTENT classification (done by classifyTrack()
+// after Apify enrichment), not a discovery distinction. You can only find med spa
+// owners reliably by searching med-spa-specific hashtags. classifyTrack() then
+// identifies which of those owners are already collab-active (Track A) vs not (Track B).
 const TRACK_A_HASHTAG_GROUPS = [
-  // Explicit partner-intent tags — direct collab language
-  ['#localcollab','#businesscollab','#collabwithus','#localpartner',
-   '#referralpartner','#opentopartner','#crosspromotion','#communitypartner',
-   '#smallbizcollab','#partnerpost','#b2bcollab','#welovecollab'],
-  // Geo-anchored intent combos — NJ/NYC collab language with location signal
-  ['#collabnj','#collabnyc','#njbizcollab','#nyclocalbusiness',
-   '#hobokensmallbiz','#jerseycitylocal','#montclairlocal','#njwellness',
-   '#nycwellnessstudio','#brooklynsmallbiz','#nylashstudio'],
-  // Event/collab context — accounts mid-partnership or promoting joint events
-  ['#giveawaycollab','#popupshop','#openhouseevent','#guestspot',
-   '#collaborationpost','#collabreels','#giveawaypartner','#partnershiplaunch',
-   '#trunkshow','#wellnessevent'],
-  // Adjacent local businesses that collab with med spas — gyms, salons, boutiques, yoga
-  // These accounts tag and get tagged by aesthetic business owners doing cross-promotion
-  ['#njgym','#nyyogastudio','#njhairsalon','#njboutique','#njbridal',
-   '#personaltrainernj','#njchiropractor','#localgymnj','#njaesthetics',
-   '#njlaserstudio','#nycyoga','#nychairsalon'],
+  // Same NJ city-level geo tags as Track B — highest signal for finding actual providers
+  ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
+   '#princetonmedspa','#morristownmedspa','#newjerseymedspa','#njmedspa','#njbotox','#njfiller'],
+  // Same NYC borough + suburb geo as Track B
+  ['#nycmedspa','#manhattanmedspa','#brooklynmedspa','#longislandmedspa',
+   '#westchestermedspa','#nycbotox','#nycfiller','#nycaesthetics','#njaesthetics'],
+  // Credential-based — same as Track B, these are almost always real owners
+  ['#nurseinjector','#aestheticnurse','#aestheticnp','#aestheticpa',
+   '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
+  // Aesthetics-specific collab tags — low volume but highly on-ICP
+  // These are the only intent tags worth including because they are category-anchored
+  ['#medspacollab','#aestheticscollab','#injectorcollab','#medspapartner',
+   '#aestheticspartner','#njaesthetics','#njinjector','#nycinjector',
+   '#medspaevent','#aestheticsevent'],
 ];
 
 // Backward-compatible alias — keeps existing code paths that reference HASHTAG_GROUPS working
@@ -420,6 +424,150 @@ async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1
   return candidates;
 }
 
+// ── Phase 1 (Track A): Keyword-based discovery ────────────────────────────────
+// Two parallel search paths hit Instagram's actual search index:
+//
+//   Hashtag search: search = 'med spa collab', searchType = 'hashtag'
+//     → Apify finds hashtags matching the keyword phrase, scrapes their posts,
+//       returns post objects with ownerUsername. Same parsing as getHandlesFromHashtags.
+//       Lower bio/follower data but covers content-based collab signals.
+//
+//   User search:   search = 'med spa NJ collab', searchType = 'user'
+//     → Apify queries Instagram's user directory and returns PROFILE objects directly.
+//       Bio and follower count are populated in Phase 1 (unlike hashtag scraping which
+//       returns bio=0 followers=0). Phase 1.5 pre-filter can therefore reject non-ICP
+//       accounts BEFORE spending Apify credits on Phase 2 enrichment.
+//
+// Why not use generic collab hashtags like #localcollab?
+// They pull in every type of business (shipping stores, coding events, gyms).
+// Keyword combos that cross CATEGORY × INTENT ensure both signals are present.
+
+// Category terms anchor searches to our ICP — prevents generic businesses slipping through
+const KEYWORD_CATEGORY = [
+  'med spa', 'medspa', 'aesthetics', 'injector', 'botox', 'filler',
+];
+
+// Intent terms surface accounts with active partnership behavior
+const KEYWORD_INTENT = [
+  'collab', 'partner', 'giveaway', 'event', 'pop up', 'open house',
+];
+
+// Hashtag search combos: category + intent → Apify finds matching hashtags → posts
+// Run as searchType='hashtag'. One run per combo.
+const HASHTAG_SEARCH_TERMS = [
+  'med spa collab', 'med spa partner', 'med spa giveaway',
+  'med spa event', 'med spa open house', 'med spa pop up',
+  'medspa collab', 'aesthetics collab', 'aesthetic partner',
+  'injector collab', 'injector event', 'skincare partner',
+];
+
+// User search combos: direct profile search with geo + category + intent
+// searchType='user' returns profiles with bio/followers already populated.
+const USER_SEARCH_TERMS = [
+  // NJ geo + category
+  'med spa NJ collab', 'medspa NJ partner', 'aesthetics NJ collab',
+  'injector NJ', 'botox NJ owner', 'medspa owner NJ',
+  // NYC geo + category
+  'medspa NYC collab', 'aesthetics NYC partner', 'injector NYC',
+  'botox NYC owner', 'medspa owner NYC',
+  // Specific city combos
+  'medspa hoboken', 'medspa jersey city', 'medspa princeton',
+];
+
+async function getHandlesFromKeywords(): Promise<Phase1Candidate[]> {
+  console.log(`[scout] Phase 1 (Track A): starting keyword search — ${HASHTAG_SEARCH_TERMS.length} hashtag + ${USER_SEARCH_TERMS.length} user queries`);
+
+  // Fire all runs in parallel: hashtag searches + user searches
+  const [hashtagRunIds, userRunIds] = await Promise.all([
+    Promise.all(
+      HASHTAG_SEARCH_TERMS.map(term =>
+        startRun({
+          search: term,
+          searchType: 'hashtag',
+          searchLimit: 5,      // find up to 5 matching hashtags per keyword
+          resultsLimit: 20,    // scrape 20 posts per hashtag
+        }).catch(err => { console.error(`[scout] Hashtag search start error (${term}):`, err); return null; })
+      )
+    ),
+    Promise.all(
+      USER_SEARCH_TERMS.map(term =>
+        startRun({
+          search: term,
+          searchType: 'user',
+          searchLimit: 25,     // return up to 25 matching profiles per keyword
+        }).catch(err => { console.error(`[scout] User search start error (${term}):`, err); return null; })
+      )
+    ),
+  ]);
+
+  // Poll all runs in parallel
+  const [hashtagResults, userResults] = await Promise.all([
+    Promise.all(hashtagRunIds.map(id =>
+      id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[])
+    )),
+    Promise.all(userRunIds.map(id =>
+      id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[])
+    )),
+  ]);
+
+  const seen = new Set<string>();
+  const candidates: Phase1Candidate[] = [];
+  let userProfileCount = 0;
+  let hashtagPostCount = 0;
+
+  // ── Parse hashtag search results (post objects, same shape as getHandlesFromHashtags) ──
+  for (const items of hashtagResults) {
+    hashtagPostCount += items.length;
+    for (const item of items) {
+      const post = item as {
+        ownerUsername?: string; ownerFullName?: string;
+        biography?: string; ownersFollowersCount?: number;
+        followersCount?: number; isPrivate?: boolean;
+        owner?: { username?: string; fullName?: string; biography?: string; followersCount?: number; isPrivate?: boolean };
+      };
+      const username = post.ownerUsername ?? post.owner?.username ?? '';
+      if (!username || seen.has(username) || PERMANENT_EXCLUSIONS.has(username)) continue;
+      seen.add(username);
+      candidates.push({
+        username,
+        displayName: post.ownerFullName ?? post.owner?.fullName ?? '',
+        biography: post.biography ?? post.owner?.biography ?? '',
+        followersCount: post.ownersFollowersCount ?? post.followersCount ?? post.owner?.followersCount ?? 0,
+        isPrivate: post.isPrivate ?? post.owner?.isPrivate ?? false,
+      });
+    }
+  }
+
+  // ── Parse user search results (profile objects — bio/followers populated!) ────
+  // searchType='user' returns Instagram user profiles directly, not posts.
+  // This means Phase 1.5 pre-filter can check ICP keywords and reject non-med-spa
+  // accounts before we spend Apify credits on Phase 2 enrichment.
+  for (const items of userResults) {
+    for (const item of items) {
+      const user = item as {
+        username?: string; fullName?: string; biography?: string;
+        followersCount?: number; isPrivate?: boolean;
+        // User search results may also return these
+        postsCount?: number; isBusinessAccount?: boolean;
+      };
+      const username = user.username ?? '';
+      if (!username || seen.has(username) || PERMANENT_EXCLUSIONS.has(username)) continue;
+      seen.add(username);
+      userProfileCount++;
+      candidates.push({
+        username,
+        displayName: user.fullName ?? '',
+        biography: user.biography ?? '',        // populated — no bio=0 problem
+        followersCount: user.followersCount ?? 0, // populated — no followers=0 problem
+        isPrivate: user.isPrivate ?? false,
+      });
+    }
+  }
+
+  console.log(`[scout] Phase 1 (Track A): ${candidates.length} unique accounts — ${userProfileCount} from user search (bio+followers populated), ${candidates.length - userProfileCount} from hashtag posts (${hashtagPostCount} total posts scanned)`);
+  return candidates;
+}
+
 // ── Phase 1.5: Pre-filter all candidates before expensive profile enrichment ───
 // Applies as much of isOwner() as possible from Phase 1 data.
 // Accounts without bio data get a soft pass — Phase 2 enrichment decides.
@@ -458,6 +606,23 @@ function preFilter(
 
     for (const pattern of EMPLOYEE_PATTERNS) {
       if (pattern.test(candidate.biography)) return { pass: false, reason: 'employee pattern' };
+    }
+  }
+
+  // Person vs. business page check — run whenever we have a display name.
+  // looksLikePersonName is cheap (regex only) so there is no reason to defer it to Phase 2.
+  // For Track A user searches, displayName is always populated. For hashtag scrapes it is
+  // often populated too. We only reject if displayName is present AND fails — empty names
+  // get a soft pass since Phase 2 enrichment will decide with full profile data.
+  if (candidate.displayName.length > 0 && !looksLikePersonName(candidate.displayName)) {
+    // Allow through if bio has strong personal ownership signals —
+    // some owners run under a business name but write "I own" in their bio
+    const bioLower = candidate.biography.toLowerCase();
+    const hasPersonalBio = bioLower.includes('i own') || bioLower.includes('my spa') ||
+      bioLower.includes('my clinic') || bioLower.includes('my practice') ||
+      bioLower.includes('founder') || bioLower.includes('owner');
+    if (!hasPersonalBio) {
+      return { pass: false, reason: `business page display name: "${candidate.displayName}"` };
     }
   }
 
@@ -700,9 +865,9 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
 
   await pool.query(`UPDATE scout_memory SET last_run = NOW(), updated_at = NOW() WHERE date = $1`, [today]);
 
-  // Select hashtag strategy based on discovery mode
-  const activeHashtagGroups = discoveryMode === 'A' ? TRACK_A_HASHTAG_GROUPS : TRACK_B_HASHTAG_GROUPS;
-  console.log(`[scout] Discovery mode: Track ${discoveryMode} — ${activeHashtagGroups.length} hashtag groups`);
+  // Track A uses keyword-based search (category × intent combos, user + hashtag search types).
+  // Track B uses hashtag page scraping (category/credential/geo anchored tags).
+  console.log(`[scout] Discovery mode: Track ${discoveryMode}`);
 
   const { rows: knownRows } = await pool.query<{ handle: string }>(`SELECT handle FROM prospects`);
   const knownHandles = new Set([
@@ -713,7 +878,11 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
 
   let phase1Candidates: Phase1Candidate[] = [];
   try {
-    phase1Candidates = await getHandlesFromHashtags(activeHashtagGroups);
+    if (discoveryMode === 'A') {
+      phase1Candidates = await getHandlesFromKeywords();
+    } else {
+      phase1Candidates = await getHandlesFromHashtags(TRACK_B_HASHTAG_GROUPS);
+    }
   } catch (err) {
     return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}`, discoveryMode };
   }
@@ -830,7 +999,9 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
     `, [
       p.username, sanitize(p.displayName), sanitize(p.biography),
       p.followersCount, p.followsCount, p.postsCount,
-      `track_${discoveryMode}: ${activeHashtagGroups.flat().slice(0,3).join(', ')}`,
+      discoveryMode === 'A'
+        ? `track_A: keyword search (${HASHTAG_SEARCH_TERMS.slice(0,2).join(', ')}...)`
+        : `track_B: ${TRACK_B_HASHTAG_GROUPS.flat().slice(0,3).join(', ')}`,
       p.hasBookingLink, p.usesStories,
       JSON.stringify(p.recentCaptions),
       JSON.stringify(p.collabSignals),
