@@ -454,61 +454,74 @@ const KEYWORD_INTENT = [
 
 // Hashtag search combos: category + intent → Apify finds matching hashtags → posts
 // Run as searchType='hashtag'. One run per combo.
+// Trimmed to highest-signal terms only.
+// Free Apify plan cap: 8192MB total across all concurrent runs.
+// Each run requests 1024MB, so max 8 concurrent runs safely (leaving headroom).
+// We run in sequential batches of 3 to stay well under the ceiling.
 const HASHTAG_SEARCH_TERMS = [
-  'med spa collab', 'med spa partner', 'med spa giveaway',
-  'med spa event', 'med spa open house', 'med spa pop up',
-  'medspa collab', 'aesthetics collab', 'aesthetic partner',
-  'injector collab', 'injector event', 'skincare partner',
+  'med spa collab',     // highest intent signal
+  'med spa partner',
+  'aesthetics collab',
+  'injector collab',
+  'medspa collab',
 ];
 
-// User search combos: direct profile search with geo + category + intent
-// searchType='user' returns profiles with bio/followers already populated.
+// User search returns profiles with bio/followers already populated.
+// Kept to highest-signal geo + category combos only.
 const USER_SEARCH_TERMS = [
-  // NJ geo + category
-  'med spa NJ collab', 'medspa NJ partner', 'aesthetics NJ collab',
-  'injector NJ', 'botox NJ owner', 'medspa owner NJ',
-  // NYC geo + category
-  'medspa NYC collab', 'aesthetics NYC partner', 'injector NYC',
-  'botox NYC owner', 'medspa owner NYC',
-  // Specific city combos
-  'medspa hoboken', 'medspa jersey city', 'medspa princeton',
+  'medspa owner NJ',
+  'injector NJ',
+  'medspa owner NYC',
+  'injector NYC',
+  'aesthetics NJ collab',
 ];
+
+// Run a list of Apify search terms in sequential batches to stay under
+// the free plan memory ceiling (8192MB, 1024MB per run = max 8 concurrent).
+async function runInBatches(
+  terms: string[],
+  buildInput: (term: string) => Record<string, unknown>,
+  batchSize = 3,
+  label = 'batch',
+): Promise<unknown[][]> {
+  const allResults: unknown[][] = [];
+  for (let i = 0; i < terms.length; i += batchSize) {
+    const batch = terms.slice(i, i + batchSize);
+    console.log(`[scout] ${label}: running batch ${Math.floor(i / batchSize) + 1} — ${batch.join(', ')}`);
+    const runIds = await Promise.all(
+      batch.map(term =>
+        startRun(buildInput(term))
+          .catch(err => { console.error(`[scout] Run start error (${term}):`, err); return null; })
+      )
+    );
+    const results = await Promise.all(
+      runIds.map(id =>
+        id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[])
+      )
+    );
+    allResults.push(...results);
+    if (i + batchSize < terms.length) await sleep(2000); // brief pause between batches
+  }
+  return allResults;
+}
 
 async function getHandlesFromKeywords(): Promise<Phase1Candidate[]> {
-  console.log(`[scout] Phase 1 (Track A): starting keyword search — ${HASHTAG_SEARCH_TERMS.length} hashtag + ${USER_SEARCH_TERMS.length} user queries`);
+  console.log(`[scout] Phase 1 (Track A): ${HASHTAG_SEARCH_TERMS.length} hashtag + ${USER_SEARCH_TERMS.length} user searches in batches of 3`);
 
-  // Fire all runs in parallel: hashtag searches + user searches
-  const [hashtagRunIds, userRunIds] = await Promise.all([
-    Promise.all(
-      HASHTAG_SEARCH_TERMS.map(term =>
-        startRun({
-          search: term,
-          searchType: 'hashtag',
-          searchLimit: 5,      // find up to 5 matching hashtags per keyword
-          resultsLimit: 20,    // scrape 20 posts per hashtag
-        }).catch(err => { console.error(`[scout] Hashtag search start error (${term}):`, err); return null; })
-      )
-    ),
-    Promise.all(
-      USER_SEARCH_TERMS.map(term =>
-        startRun({
-          search: term,
-          searchType: 'user',
-          searchLimit: 25,     // return up to 25 matching profiles per keyword
-        }).catch(err => { console.error(`[scout] User search start error (${term}):`, err); return null; })
-      )
-    ),
-  ]);
+  // Run hashtag searches then user searches sequentially (batches of 3 each)
+  const hashtagResults = await runInBatches(
+    HASHTAG_SEARCH_TERMS,
+    term => ({ search: term, searchType: 'hashtag', searchLimit: 5, resultsLimit: 20 }),
+    3,
+    'hashtag search',
+  );
 
-  // Poll all runs in parallel
-  const [hashtagResults, userResults] = await Promise.all([
-    Promise.all(hashtagRunIds.map(id =>
-      id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[])
-    )),
-    Promise.all(userRunIds.map(id =>
-      id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[])
-    )),
-  ]);
+  const userResults = await runInBatches(
+    USER_SEARCH_TERMS,
+    term => ({ search: term, searchType: 'user', searchLimit: 20 }),
+    3,
+    'user search',
+  );
 
   const seen = new Set<string>();
   const candidates: Phase1Candidate[] = [];
