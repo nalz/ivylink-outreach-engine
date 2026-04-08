@@ -127,6 +127,46 @@ const OWNER_SIGNALS = [
   'pa-c','fnp','fnp-c','dnp','aprn','np-c','physician','md ','do ','rn bsn',
 ];
 
+// ── Person vs. business page detection ───────────────────────────────────────
+// Business pages are run by marketing teams, not the owner directly.
+// DM response rates are near-zero for pure brand accounts.
+// We want the actual human who owns the needle.
+
+const PERSON_CREDENTIALS = ['\\bnp\\b','\\bpa\\b','\\brn\\b','\\bmd\\b','\\bdo\\b','\\bdnp\\b','\\bfnp\\b','\\baprn\\b','pa-c','fnp-c','np-c','rn bsn'];
+const BIZ_WORDS_IN_NAME = ['medspa','med spa','aesthetics','medical','clinic','center','studio','wellness','institute','llc','inc','laser','beauty','skincare','skin care'];
+
+function looksLikePersonName(displayName: string): boolean {
+  if (!displayName) return false;
+  const nameLower = displayName.toLowerCase();
+
+  // Credential suffix → definitely a person ("Sarah NP", "Dr. Kim PA-C")
+  if (PERSON_CREDENTIALS.some(c => new RegExp(c, 'i').test(displayName))) return true;
+
+  // Dr. / Nurse / Injector prefix → person
+  if (/^(dr\.?\s|nurse\s|injector\s)/i.test(displayName.trim())) return true;
+
+  // Count business words in display name
+  const bizCount = BIZ_WORDS_IN_NAME.filter(w => nameLower.includes(w)).length;
+
+  // 2+ business words = business page ("Eminence Medical Aesthetics", "NJ Laser Center")
+  if (bizCount >= 2) return false;
+
+  // 1 business word but has a personal separator ("Sarah | Aesthetics", "Kim · Medspa")
+  if (bizCount === 1 && /[|·•—]/.test(displayName)) return true;
+
+  // Possessive form = person's business ("Kim's Medspa", "Jessica's Studio")
+  if (/'\s*s\s/i.test(displayName)) return true;
+
+  // Single word with no credential — just a brand slug
+  const words = displayName.trim().split(/\s+/);
+  if (words.length === 1 && bizCount === 0) return false;
+
+  // 2–3 words, no business terms → likely a person name ("Sarah Jane", "Jessica Kim")
+  if (words.length <= 3 && bizCount === 0) return true;
+
+  return false;
+}
+
 const EMPLOYEE_PATTERNS = [
   // "aesthetician @place" or "esthetician at @place"
   /aesthetician\s+@/i,
@@ -201,9 +241,21 @@ function isOwner(account: {
     || /^[A-Z][a-zA-Z\s]+(Med Spa|Medspa|Aesthetics|Clinic|Studio|Wellness)/i.test(account.displayName ?? '');
 
   if (!hasOwner) {
+    // Soft pass: business account with spa category AND looks like a real person's account
+    // Requiring looksLikePersonName filters out pure brand pages (Eminence Medical Aesthetics,
+    // NJ Laser Center, etc.) that pass the business/follower/category checks but have no human
+    // identity behind them. DM response rates on those are near-zero.
     const softPass = account.isBusinessAccount && account.followersCount > 800
-      && (account.category ?? '').toLowerCase().includes('spa');
-    if (!softPass) return { qualified: false, reason: 'no ownership signal' };
+      && (account.category ?? '').toLowerCase().includes('spa')
+      && looksLikePersonName(account.displayName ?? '');
+    if (!softPass) return { qualified: false, reason: 'no ownership signal or pure business page' };
+  }
+
+  // Final check: even with owner signals, reject pure business pages with no personal identity.
+  // A business page bio ("Award-winning Medspa | EST. 2013") with a brand display name
+  // is almost never the owner responding to DMs.
+  if (!looksLikePersonName(account.displayName ?? '') && !bio.includes('i ') && !bio.includes("my ")) {
+    return { qualified: false, reason: 'business page — no personal identity in name or bio' };
   }
 
   return { qualified: true, reason: 'passed' };
@@ -417,6 +469,13 @@ function preFilter(
 
 // ── Phase 2: Batch profile enrichment ─────────────────────────────────────────
 
+// Google Reviews data fetched after Apify enrichment
+interface GoogleReviewData {
+  rating: number;           // overall star rating
+  totalRatings: number;     // total review count
+  highlights: string[];     // 2-3 review snippets mentioning the owner, technique, or results
+}
+
 interface EnrichedProfile {
   username: string; displayName: string; biography: string;
   followersCount: number; followsCount: number; postsCount: number;
@@ -431,6 +490,88 @@ interface EnrichedProfile {
   collabSignals: string[];
   localSignals: string[];
   contentThemes: string[];
+  googleReviews: GoogleReviewData | null;
+}
+
+// ── Phase 2.5: Google Reviews fetch ──────────────────────────────────────────
+// Uses Google Places Text Search + Place Details to find the business and
+// pull reviews. Only runs if GOOGLE_PLACES_API_KEY is set.
+// Gracefully skips if API key missing or business not found.
+
+const GOOGLE_PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY ?? '';
+
+async function fetchGoogleReviews(
+  businessName: string,
+  city: string
+): Promise<GoogleReviewData | null> {
+  if (!GOOGLE_PLACES_KEY) return null;
+  if (!businessName || !city) return null;
+
+  try {
+    // Step 1: Text search to find the place_id
+    const query = encodeURIComponent(`${businessName} ${city} med spa`);
+    const searchRes = await fetch(
+      `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${GOOGLE_PLACES_KEY}`
+    );
+    const searchData = await searchRes.json() as {
+      results?: Array<{ place_id: string; name: string; rating?: number; user_ratings_total?: number }>;
+      status: string;
+    };
+
+    if (!searchData.results?.length) return null;
+    const place = searchData.results[0];
+    const placeId = place.place_id;
+
+    // Step 2: Place Details to get reviews
+    const detailRes = await fetch(
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=rating,user_ratings_total,reviews&key=${GOOGLE_PLACES_KEY}`
+    );
+    const detailData = await detailRes.json() as {
+      result?: {
+        rating?: number;
+        user_ratings_total?: number;
+        reviews?: Array<{ text: string; rating: number }>;
+      };
+    };
+
+    const result = detailData.result;
+    if (!result) return null;
+
+    const reviews = result.reviews ?? [];
+
+    // Extract highlights: sentences from 4-5 star reviews that mention something specific
+    // about the owner, a technique, a result, or a personal experience
+    const highlightKeywords = [
+      'natural', 'listen', 'gentle', 'explain', 'honest', 'trust',
+      'result', 'before', 'after', 'amazing', 'transform', 'recommend',
+      'she', 'he', 'her', 'him', 'owner', 'dr.', 'nurse',
+      'botox', 'filler', 'lip', 'jawline', 'cheek', 'laser', 'hydrafacial',
+    ];
+
+    const highlights = reviews
+      .filter(r => r.rating >= 4)
+      .map(r => {
+        // Split into sentences, find the most specific one
+        const sentences = r.text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 20);
+        const best = sentences.find(s =>
+          highlightKeywords.some(kw => s.toLowerCase().includes(kw))
+        ) ?? sentences[0] ?? '';
+        return best.slice(0, 180); // cap length
+      })
+      .filter(h => h.length > 20)
+      .slice(0, 3);
+
+    if (!result.rating && !highlights.length) return null;
+
+    return {
+      rating: result.rating ?? 0,
+      totalRatings: result.user_ratings_total ?? 0,
+      highlights,
+    };
+  } catch (err) {
+    console.warn(`[scout] Google Reviews fetch failed for "${businessName}": ${err}`);
+    return null;
+  }
 }
 
 async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
@@ -520,6 +661,7 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
       collabSignals: sanitizeArr(collabSignals),
       localSignals: sanitizeArr(localSignals),
       contentThemes: sanitizeArr(contentThemes),
+      googleReviews: null, // Populated in Phase 2.5 after this batch returns
     };
   }).filter(p => p.username !== '');
 }
@@ -617,6 +759,26 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
     console.log(`[scout] Categories: ${profiles.slice(0,5).map(p => `@${p.username}="${p.category}"`).join(', ')}`);
   }
 
+  // ── Phase 2.5: Google Reviews enrichment ────────────────────────────────────
+  // Fetch reviews for each qualified-looking profile in parallel (max 5 concurrent).
+  // We do this after Apify enrichment so we have the business name and city to search with.
+  if (GOOGLE_PLACES_KEY && profiles.length > 0) {
+    console.log(`[scout] Phase 2.5: fetching Google Reviews for ${profiles.length} profiles`);
+    const reviewChunks: EnrichedProfile[][] = [];
+    for (let i = 0; i < profiles.length; i += 5) reviewChunks.push(profiles.slice(i, i + 5));
+    for (const chunk of reviewChunks) {
+      await Promise.all(chunk.map(async (profile) => {
+        const city = profile.localSignals[0] ?? '';
+        const reviews = await fetchGoogleReviews(profile.displayName, city);
+        if (reviews) {
+          profile.googleReviews = reviews;
+          console.log(`[scout] Reviews @${profile.username}: ${reviews.rating}★ (${reviews.totalRatings} ratings)`);
+        }
+      }));
+      await sleep(500); // gentle rate limiting between chunks
+    }
+  }
+
   const qualified: Array<EnrichedProfile & { track: 'A'|'B' }> = [];
 
   for (const profile of profiles) {
@@ -674,7 +836,7 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
       JSON.stringify(p.collabSignals),
       JSON.stringify(p.localSignals),
       JSON.stringify(p.contentThemes),
-      JSON.stringify({ track: p.track, structured_posts: structuredPosts }),
+      JSON.stringify({ track: p.track, structured_posts: structuredPosts, google_reviews: p.googleReviews ?? null }),
     ]);
 
     if (rowCount && rowCount > 0) {

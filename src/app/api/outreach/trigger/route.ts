@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
   }
 
   const job = req.nextUrl.searchParams.get('job') ?? 'radar';
+  const trackParam = req.nextUrl.searchParams.get('track');
+  const discoveryMode: 'A' | 'B' = trackParam === 'A' ? 'A' : 'B';
 
   if (!['radar', 'analyst', 'scout'].includes(job)) {
     return NextResponse.json(
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
 
     if (job === 'scout') {
       const { runScout } = await import('@/../workers/scout');
-      result = await runScout(pool);
+      result = await runScout(pool, discoveryMode);
     }
 
     if (job === 'analyst') {

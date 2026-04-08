@@ -875,125 +875,38 @@ export default function OutreachPage() {
             Manual Trigger
           </span>
 
-          {/* Radar */}
-          <button
-            onClick={() => handleTrigger('radar')}
-            disabled={!!triggering}
-            style={{
-              padding: '5px 14px',
-              background: triggering === 'radar' ? `${C.coral}22` : C.badge,
-              border: `1px solid ${triggering === 'radar' ? C.coral : C.borderStrong}`,
-              borderRadius: 6,
-              color: triggering === 'radar' ? C.coral : C.textMuted,
-              fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit', transition: 'all 0.15s',
-            }}
-          >
+          <button onClick={() => handleTrigger('radar')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'radar' ? `${C.coral}22` : C.badge, border: `1px solid ${triggering === 'radar' ? C.coral : C.borderStrong}`, borderRadius: 6, color: triggering === 'radar' ? C.coral : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
             {triggering === 'radar' ? 'Running radar...' : 'Run radar'}
           </button>
 
-          {/* Analyst */}
-          <button
-            onClick={() => handleTrigger('analyst')}
-            disabled={!!triggering}
-            style={{
-              padding: '5px 14px',
-              background: triggering === 'analyst' ? `${C.coral}22` : C.badge,
-              border: `1px solid ${triggering === 'analyst' ? C.coral : C.borderStrong}`,
-              borderRadius: 6,
-              color: triggering === 'analyst' ? C.coral : C.textMuted,
-              fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
-              fontFamily: 'inherit', transition: 'all 0.15s',
-            }}
-          >
+          <button onClick={() => handleTrigger('analyst')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'analyst' ? `${C.coral}22` : C.badge, border: `1px solid ${triggering === 'analyst' ? C.coral : C.borderStrong}`, borderRadius: 6, color: triggering === 'analyst' ? C.coral : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
             {triggering === 'analyst' ? 'Running analyst...' : 'Run analyst'}
           </button>
 
-          {/* Scout divider */}
           <div style={{ width: 1, height: 20, background: C.border, margin: '0 2px' }} />
 
-          {/* Scout Track A */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <button
-              onClick={() => handleTrigger('scout', 'A')}
-              disabled={!!triggering}
-              style={{
-                padding: '5px 14px',
-                background: triggering === 'scout-A' ? `${C.tangerine}22` : C.badge,
-                border: `1px solid ${triggering === 'scout-A' ? C.tangerine : C.borderStrong}`,
-                borderRadius: 6,
-                color: triggering === 'scout-A' ? C.tangerine : C.textMuted,
-                fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', transition: 'all 0.15s',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}
-            >
-              {triggering === 'scout-A' ? 'Scouting A...' : (
-                <>
-                  Scout
-                  <span style={{
-                    padding: '1px 5px',
-                    background: `${C.tangerine}33`,
-                    border: `1px solid ${C.tangerine}55`,
-                    borderRadius: 3,
-                    fontSize: 9, fontWeight: 800, color: C.tangerine,
-                    letterSpacing: '0.08em',
-                  }}>A</span>
-                </>
-              )}
+            <button onClick={() => handleTrigger('scout', 'A')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'scout-A' ? `${C.tangerine}22` : C.badge, border: `1px solid ${triggering === 'scout-A' ? C.tangerine : C.borderStrong}`, borderRadius: 6, color: triggering === 'scout-A' ? C.tangerine : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 5 }}>
+              {triggering === 'scout-A' ? 'Scouting A...' : <><span>Scout</span><span style={{ padding: '1px 5px', background: `${C.tangerine}33`, border: `1px solid ${C.tangerine}55`, borderRadius: 3, fontSize: 9, fontWeight: 800, color: C.tangerine, letterSpacing: '0.08em' }}>A</span></>}
             </button>
-            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>
-              partner intent
-            </span>
+            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>partner intent</span>
           </div>
 
-          {/* Scout Track B */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <button
-              onClick={() => handleTrigger('scout', 'B')}
-              disabled={!!triggering}
-              style={{
-                padding: '5px 14px',
-                background: triggering === 'scout-B' ? `${C.coral}22` : C.badge,
-                border: `1px solid ${triggering === 'scout-B' ? C.coral : C.borderStrong}`,
-                borderRadius: 6,
-                color: triggering === 'scout-B' ? C.coral : C.textMuted,
-                fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit', transition: 'all 0.15s',
-                display: 'flex', alignItems: 'center', gap: 5,
-              }}
-            >
-              {triggering === 'scout-B' ? 'Scouting B...' : (
-                <>
-                  Scout
-                  <span style={{
-                    padding: '1px 5px',
-                    background: `${C.coral}33`,
-                    border: `1px solid ${C.coral}55`,
-                    borderRadius: 3,
-                    fontSize: 9, fontWeight: 800, color: C.coral,
-                    letterSpacing: '0.08em',
-                  }}>B</span>
-                </>
-              )}
+            <button onClick={() => handleTrigger('scout', 'B')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'scout-B' ? `${C.coral}22` : C.badge, border: `1px solid ${triggering === 'scout-B' ? C.coral : C.borderStrong}`, borderRadius: 6, color: triggering === 'scout-B' ? C.coral : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 5 }}>
+              {triggering === 'scout-B' ? 'Scouting B...' : <><span>Scout</span><span style={{ padding: '1px 5px', background: `${C.coral}33`, border: `1px solid ${C.coral}55`, borderRadius: 3, fontSize: 9, fontWeight: 800, color: C.coral, letterSpacing: '0.08em' }}>B</span></>}
             </button>
-            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>
-              owner category
-            </span>
+            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>owner category</span>
           </div>
 
           {triggerResult && (
-            <span style={{
-              fontSize: 11, fontWeight: 500,
-              color: triggerResult.startsWith('✓') ? C.green : C.red,
-              marginLeft: 4,
-            }}>
+            <span style={{ fontSize: 11, fontWeight: 500, color: triggerResult.startsWith('✓') ? C.green : C.red, marginLeft: 4 }}>
               {triggerResult}
             </span>
           )}
         </div>
 
-        {/* Tab bar */}
+                {/* Tab bar */}
         <div style={{
           display: 'flex', gap: 4,
           background: C.surface, border: `1px solid ${C.border}`,

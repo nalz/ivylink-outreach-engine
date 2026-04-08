@@ -152,12 +152,13 @@ export async function runAnalyst(pool: Pool): Promise<{
 
   for (const p of prospects) {
     try {
-      // Parse track + structured posts from notes field
+      // Parse track + structured posts + google reviews from notes field
       let track: 'A' | 'B' = 'B';
       let structuredPosts: ProspectProfileInput['structured_posts'] = [];
+      let googleReviews: ProspectProfileInput['google_reviews'] = null;
       if (p.notes) {
         try {
-          const notes = JSON.parse(p.notes) as { track?: string; structured_posts?: unknown[] };
+          const notes = JSON.parse(p.notes) as { track?: string; structured_posts?: unknown[]; google_reviews?: unknown };
           track = notes.track === 'A' ? 'A' : 'B';
           const rawPosts = (notes.structured_posts ?? []) as Array<{
             days_ago?: number; caption?: string; type?: string; url?: string;
@@ -194,6 +195,13 @@ export async function runAnalyst(pool: Pool): Promise<{
           })) as ProspectProfileInput['structured_posts'];
 
           console.log(`[analyst] @${p.handle}: ${rawPosts.length} raw posts → ${structuredPosts?.length ?? 0} after filtering`);
+
+          // Parse Google Reviews if present
+          if (notes.google_reviews) {
+            try {
+              googleReviews = notes.google_reviews as ProspectProfileInput['google_reviews'];
+            } catch { /* ignore malformed review data */ }
+          }
         } catch {
           // notes not JSON — default to Track B
         }
@@ -217,6 +225,7 @@ export async function runAnalyst(pool: Pool): Promise<{
         collab_signals: p.collab_signals ?? [],
         local_signals: p.local_signals ?? [],
         content_themes: p.content_themes ?? [],
+        google_reviews: googleReviews,
       };
 
       const result = await analyzeProspect(profile);

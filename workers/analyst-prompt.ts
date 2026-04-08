@@ -184,21 +184,33 @@ Style A5 — Peer curiosity (safe fallback):
 TRACK B DM PLAYBOOK (collab-ready)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-These owners need to first share how they currently get clients before you introduce the collab angle.
-Do NOT mention collabs in the first DM. Focus on client acquisition curiosity.
+These owners have strong fundamentals but no visible collab history. Open with genuine curiosity
+about their work, their expertise, or their practice — not about how they get clients.
+Do NOT mention collabs, client acquisition, growth channels, or business strategy in the first DM.
 Generate 3 variants. Pick from these styles:
 
-Style B1 — Content-specific (ONLY if a real caption in structured_posts):
-"Hey [name], your [specific treatment/topic from actual caption] content is doing something right. Is most of your new client volume coming through Instagram or are you running other channels alongside it?"
+Style B1 — Technique/result curiosity (ONLY if a specific treatment appears in structured_posts):
+Reference something precise from the caption — a technique, a result detail, or an observation
+about the approach. Ask a genuine clinical or craft question, not a business question.
+"Hey [name], the [specific treatment/result from caption] you showed — [specific observation about technique or outcome]. Is that your standard approach or does it depend on the case?"
 
-Style B2 — Local presence (use when local_signals shows NJ/NYC location):
-"Hey [name], been noticing how a few [city] med spa owners are building strong local followings and yours keeps standing out. What has been your best channel for bringing in new clients?"
+Style B2 — Specialty/positioning observation (use when their bio or content shows a clear niche):
+Notice how they are positioning themselves in the market — the specific angle or specialty they
+are leaning into — and express genuine curiosity about how that developed.
+"Hey [name], noticed you are going deep on [their specific specialty or treatment angle from bio/content]. Is that intentional or did it develop from the clients who kept finding you?"
 
-Style B3 — Practice-stage curiosity (safe fallback, works for any owner):
-"Hey [name], at the stage you are at with the practice, what is doing the most work for new client acquisition right now? Instagram, referrals, something else?"
+Style B3 — Practice presence observation (safe fallback, no specific content needed):
+Acknowledge how their practice shows up — the aesthetic, the voice, the consistency — without
+referencing a specific post. Should feel like something a peer would genuinely notice.
+"Hey [name], building something in the NJ/NYC aesthetic space and your account kept coming up. The way you run it feels more personal than most — what does your day to day actually look like?"
 
-Style B4 — Growth signal (use when they signal expansion or hiring):
-"Hey [name], saw [specific growth signal from caption or bio]. When you are scaling like that, how are you thinking about new client acquisition — is word of mouth still carrying most of it?"
+Style B4 — Google Review informed (ONLY if google_reviews data is present with a highlight):
+Reference something specific from a real Google Review — a result, a quality, or something
+reviewers mentioned about the owner personally. This is the highest-signal personalization available.
+"Hey [name], [paraphrase of specific review highlight — e.g. 'saw a review that called out how you explained the process before starting']. That kind of [reputation/quality] is genuinely rare to see. How long did it take to build that?"
+
+Style B5 — Credential/expertise curiosity (use when they have a clinical credential in bio):
+"Hey [name], the [credential from bio] angle you are running with is pretty rare to see done this way in [city]. How long have you been practicing, and when did you go out on your own?"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STORY REPLY
@@ -267,7 +279,7 @@ Track A follow-up (introduce IvyLink angle gently):
 "Hey [name], quick question — when you run a collab, is the harder part finding the right partner or actually executing once you have agreed on something?"
 
 Track B follow-up (now you can hint at collabs):
-"Hey [name], came across a few NJ/NYC med spa owners who have started doing local business partnerships to drive new clients. Curious if that is something you have thought about or if you are focused on other channels right now."
+"Hey [name], came across a few NJ/NYC med spa owners building through local business partnerships — gyms, salons, studios in the same neighborhood. Curious if that is something you have explored or if you are heads down building the practice a different way."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RESPONSE FORMAT
@@ -308,11 +320,11 @@ All score integers must be ≥ 0. Never negative.
   },
   "content": {
     "dm_variant_1": "<text or null>",
-    "dm_variant_1_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4" | null,
+    "dm_variant_1_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4"|"B5" | null,
     "dm_variant_2": "<text or null>",
-    "dm_variant_2_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4" | null,
+    "dm_variant_2_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4"|"B5" | null,
     "dm_variant_3": "<text or null>",
-    "dm_variant_3_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4" | null,
+    "dm_variant_3_style": "A1"|"A2"|"A3"|"A4"|"A5"|"B1"|"B2"|"B3"|"B4"|"B5" | null,
     "story_reply": "<actual suggested text, 1 sentence>",
     "post_comment": "<actual suggested text based on most recent caption>",
     "post_comment_url": "<the url field from whichever structured_post you used for the comment, or null>",
@@ -351,34 +363,77 @@ export interface ProspectProfileInput {
   content_themes?: string[];
   has_booking_link?: boolean | null;
   uses_stories?: boolean | null;
+  // Google Reviews enrichment (null if not found or API key not set)
+  google_reviews?: GoogleReviewSummary | null;
+}
+
+export interface GoogleReviewSummary {
+  rating: number;
+  totalRatings: number;
+  highlights: string[];
 }
 
 export function buildAnalystUserMessage(profile: ProspectProfileInput): string {
-  return `Analyze this Instagram prospect for IvyLink's outreach pipeline.
+  // Build the Google Reviews block only when data is present
+  let reviewBlock = '\n\nGOOGLE REVIEWS: Not available for this prospect. Do not use Style B4.';
+  if (profile.google_reviews && profile.google_reviews.highlights.length > 0) {
+    const highlights = profile.google_reviews.highlights
+      .map((h, i) => `${i + 1}. "${h}"`)
+      .join('\n');
+    reviewBlock = [
+      '',
+      '',
+      'GOOGLE REVIEWS:',
+      `Rating: ${profile.google_reviews.rating}/5 (${profile.google_reviews.totalRatings} total ratings)`,
+      'Review highlights:',
+      highlights,
+      '',
+      'GOOGLE REVIEW DM RULES:',
+      '- If highlights mention the owner by name, a specific technique, a result, or a quality like',
+      '  "explained everything" or "so gentle" — this is usable for Style B4.',
+      '- Paraphrase the review; do not quote it verbatim. Use framing like "saw a review that called out..." or "noticed a reviewer mentioned..."',
+      '- Only use B4 if a highlight is specific enough to feel personal. Generic 5-star reviews ("amazing place") are NOT usable.',
+    ].join('\n');
+  }
 
-PROSPECT DATA:
-${JSON.stringify({
-  prospect_id: profile.prospect_id,
-  handle: profile.handle,
-  display_name: profile.name,
-  bio: profile.bio,
-  follower_count: profile.follower_count,
-  following_count: profile.following_count,
-  post_count: profile.post_count,
-  collab_track: profile.collab_track,
-  has_booking_link: profile.has_booking_link ?? false,
-  uses_stories: profile.uses_stories ?? false,
-  collab_signals: profile.collab_signals ?? [],
-  local_signals: profile.local_signals ?? [],
-  content_themes: profile.content_themes ?? [],
-  recent_captions: profile.recent_captions ?? [],
-  structured_posts: profile.structured_posts ?? [],
-}, null, 2)}
+  const postRules = (profile.structured_posts ?? []).length > 0
+    ? `You have ${(profile.structured_posts ?? []).length} real posts to reference for the post comment and DMs. `
+      + 'STRICT RULE: The post comment must only describe what is LITERALLY written in the caption_snippet '
+      + '— the actual words present. Do not infer technique details, dosage, syringes, or clinical specifics '
+      + 'that are not in the caption text. If a caption says "lip filler" you may react to that. '
+      + 'If it does not specify technique or dosage, you may not invent those details. '
+      + 'When in doubt, write a simpler observational comment or return null.'
+    : 'No post data available. Use safe fallback DM styles (A3/A5 for Track A, B2/B3 for Track B). Do not invent post references.';
 
-Apply the ${profile.collab_track === 'A' ? 'Track A (collab-active)' : 'Track B (collab-ready)'} scoring rubric.
-${(profile.structured_posts ?? []).length > 0
-  ? `You have ${(profile.structured_posts ?? []).length} real posts to reference for the post comment and DMs. STRICT RULE: The post comment must only describe what is LITERALLY written in the caption_snippet — the actual words present. Do not infer technique details, dosage, syringes, or clinical specifics that are not in the caption text. If a caption says "lip filler" you may react to that. If it does not specify technique or dosage, you may not invent those details. When in doubt, write a simpler observational comment or return null.`
-  : `No post data available. Use safe fallback DM styles (A3/A5 for Track A, B2/B3 for Track B). Do not invent post references.`
-}
-Return only the JSON response.`;
+  const trackLabel = profile.collab_track === 'A' ? 'Track A (collab-active)' : 'Track B (collab-ready)';
+
+  const prospectJson = JSON.stringify({
+    prospect_id:    profile.prospect_id,
+    handle:         profile.handle,
+    display_name:   profile.name,
+    bio:            profile.bio,
+    follower_count: profile.follower_count,
+    following_count:profile.following_count,
+    post_count:     profile.post_count,
+    collab_track:   profile.collab_track,
+    has_booking_link: profile.has_booking_link ?? false,
+    uses_stories:   profile.uses_stories ?? false,
+    collab_signals: profile.collab_signals ?? [],
+    local_signals:  profile.local_signals ?? [],
+    content_themes: profile.content_themes ?? [],
+    recent_captions:profile.recent_captions ?? [],
+    structured_posts: profile.structured_posts ?? [],
+  }, null, 2);
+
+  return [
+    'Analyze this Instagram prospect for IvyLink\'s outreach pipeline.',
+    '',
+    'PROSPECT DATA:',
+    prospectJson,
+    reviewBlock,
+    '',
+    `Apply the ${trackLabel} scoring rubric.`,
+    postRules,
+    'Return only the JSON response.',
+  ].join('\n');
 }
