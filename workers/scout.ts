@@ -595,7 +595,7 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
   for (const r of rejected) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
   console.log(`[scout] Rejection reasons: ${Object.entries(reasons).map(([k,v]) => `${k}=${v}`).join(', ')}`);
 
-  if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length };
+  if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length, discoveryMode };
 
   // Shuffle passed candidates — get variety across runs
   // Then take up to MAX_PROFILE_LOOKUPS for Phase 2 enrichment
