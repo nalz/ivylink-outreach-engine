@@ -751,19 +751,21 @@ export default function OutreachPage() {
     }
   }, [loadQueue]);
 
-  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout') => {
-    setTriggering(job);
+  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout', track?: 'A' | 'B') => {
+    const triggerKey = job === 'scout' && track ? `scout-${track}` : job;
+    setTriggering(triggerKey);
     setTriggerResult(null);
     try {
-      const res = await fetch(`/api/outreach/trigger?job=${job}`, { method: 'POST' });
+      const url = `/api/outreach/trigger?job=${job}${track ? `&track=${track}` : ''}`;
+      const res = await fetch(url, { method: 'POST' });
       const data = await res.json() as { ok?: boolean; result?: Record<string, unknown>; error?: string };
       if (data.ok) {
         const r = data.result ?? {};
         const summary = job === 'radar'
           ? `action=${r.action} ${r.detail}`
           : job === 'analyst'
-          ? `scored=${( r as {scored?:number}).scored ?? 0} dms=${(r as {dmsGenerated?:number}).dmsGenerated ?? 0} rejected=${(r as {rejected?:number}).rejected ?? 0}`
-          : `found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
+          ? `scored=${(r as {scored?:number}).scored ?? 0} dms=${(r as {dmsGenerated?:number}).dmsGenerated ?? 0} rejected=${(r as {rejected?:number}).rejected ?? 0}`
+          : `[Track ${(r as {discoveryMode?:string}).discoveryMode ?? track}] found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
         setTriggerResult(`✓ ${summary}`);
         await loadQueue();
       } else {
@@ -872,24 +874,114 @@ export default function OutreachPage() {
           <span style={{ fontSize: 11, color: C.textDim, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: 4 }}>
             Manual Trigger
           </span>
-          {(['radar', 'scout', 'analyst'] as const).map((job) => (
+
+          {/* Radar */}
+          <button
+            onClick={() => handleTrigger('radar')}
+            disabled={!!triggering}
+            style={{
+              padding: '5px 14px',
+              background: triggering === 'radar' ? `${C.coral}22` : C.badge,
+              border: `1px solid ${triggering === 'radar' ? C.coral : C.borderStrong}`,
+              borderRadius: 6,
+              color: triggering === 'radar' ? C.coral : C.textMuted,
+              fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', transition: 'all 0.15s',
+            }}
+          >
+            {triggering === 'radar' ? 'Running radar...' : 'Run radar'}
+          </button>
+
+          {/* Analyst */}
+          <button
+            onClick={() => handleTrigger('analyst')}
+            disabled={!!triggering}
+            style={{
+              padding: '5px 14px',
+              background: triggering === 'analyst' ? `${C.coral}22` : C.badge,
+              border: `1px solid ${triggering === 'analyst' ? C.coral : C.borderStrong}`,
+              borderRadius: 6,
+              color: triggering === 'analyst' ? C.coral : C.textMuted,
+              fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', transition: 'all 0.15s',
+            }}
+          >
+            {triggering === 'analyst' ? 'Running analyst...' : 'Run analyst'}
+          </button>
+
+          {/* Scout divider */}
+          <div style={{ width: 1, height: 20, background: C.border, margin: '0 2px' }} />
+
+          {/* Scout Track A */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <button
-              key={job}
-              onClick={() => handleTrigger(job)}
+              onClick={() => handleTrigger('scout', 'A')}
               disabled={!!triggering}
               style={{
                 padding: '5px 14px',
-                background: triggering === job ? `${C.coral}22` : C.badge,
-                border: `1px solid ${triggering === job ? C.coral : C.borderStrong}`,
+                background: triggering === 'scout-A' ? `${C.tangerine}22` : C.badge,
+                border: `1px solid ${triggering === 'scout-A' ? C.tangerine : C.borderStrong}`,
                 borderRadius: 6,
-                color: triggering === job ? C.coral : C.textMuted,
+                color: triggering === 'scout-A' ? C.tangerine : C.textMuted,
                 fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit', transition: 'all 0.15s',
+                display: 'flex', alignItems: 'center', gap: 5,
               }}
             >
-              {triggering === job ? `Running ${job}...` : `Run ${job}`}
+              {triggering === 'scout-A' ? 'Scouting A...' : (
+                <>
+                  Scout
+                  <span style={{
+                    padding: '1px 5px',
+                    background: `${C.tangerine}33`,
+                    border: `1px solid ${C.tangerine}55`,
+                    borderRadius: 3,
+                    fontSize: 9, fontWeight: 800, color: C.tangerine,
+                    letterSpacing: '0.08em',
+                  }}>A</span>
+                </>
+              )}
             </button>
-          ))}
+            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>
+              partner intent
+            </span>
+          </div>
+
+          {/* Scout Track B */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <button
+              onClick={() => handleTrigger('scout', 'B')}
+              disabled={!!triggering}
+              style={{
+                padding: '5px 14px',
+                background: triggering === 'scout-B' ? `${C.coral}22` : C.badge,
+                border: `1px solid ${triggering === 'scout-B' ? C.coral : C.borderStrong}`,
+                borderRadius: 6,
+                color: triggering === 'scout-B' ? C.coral : C.textMuted,
+                fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit', transition: 'all 0.15s',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              {triggering === 'scout-B' ? 'Scouting B...' : (
+                <>
+                  Scout
+                  <span style={{
+                    padding: '1px 5px',
+                    background: `${C.coral}33`,
+                    border: `1px solid ${C.coral}55`,
+                    borderRadius: 3,
+                    fontSize: 9, fontWeight: 800, color: C.coral,
+                    letterSpacing: '0.08em',
+                  }}>B</span>
+                </>
+              )}
+            </button>
+            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>
+              owner category
+            </span>
+          </div>
+
           {triggerResult && (
             <span style={{
               fontSize: 11, fontWeight: 500,
