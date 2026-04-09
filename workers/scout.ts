@@ -1,11 +1,9 @@
 // ============================================================
-// workers/scout.ts — IvyLink Outreach Scout v2
+// workers/scout.ts — IvyLink Outreach Scout v3
 // ============================================================
-// Architecture:
-//   Phase 1: Parallel Apify hashtag runs across owner-specific tags
-//   Phase 2: Batch profile fetch with structured post data
-//   Phase 3: Strict owner qualification + Track A/B classification
-//   Phase 4: Insert to DB with full enrichment
+// Category-aware: medspa | salon | fitness
+// Each category has its own hashtags, ICP keywords, owner signals.
+// icp_category is stored in the notes JSON for the analyst.
 // ============================================================
 
 import { Pool } from 'pg';
@@ -20,11 +18,134 @@ function sanitizeArr(arr: string[]): string[] {
   return (arr ?? []).map(sanitize);
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── ICP Category ──────────────────────────────────────────────────────────────
 
-const APIFY_TOKEN   = process.env.APIFY_TOKEN!;
-const APIFY_ACTOR   = 'apify~instagram-scraper';
-const APIFY_BASE    = 'https://api.apify.com/v2';
+export type IcpCategory = 'medspa' | 'salon' | 'fitness';
+
+export const ICP_CATEGORY_LABELS: Record<IcpCategory, string> = {
+  medspa:  'Med Spa / Aesthetic Practice',
+  salon:   'Salon / Lash / Brow / Nail Studio',
+  fitness: 'Gym / Yoga / Pilates Studio',
+};
+
+interface CategoryConfig {
+  label: string;
+  hashtagGroups: string[][];
+  icpKeywords: string[];
+  ownerSignals: string[];
+  badCategories: string[];
+  softPassCategory: string;
+  vendorSignalExtras: string[];
+  googlePlacesType: string;
+}
+
+const CATEGORY_CONFIG: Record<IcpCategory, CategoryConfig> = {
+
+  medspa: {
+    label: 'Med Spa / Aesthetic Practice',
+    hashtagGroups: [
+      ['#medspaowner','#injectorowner','#medspafounder','#aestheticpracticeowner',
+       '#myownboss','#mymedicalspa','#ownedandoperated','#smallbizowner','#womenwhobuild'],
+      ['#njnurseinjector','#nycnurseinjector','#njnp','#njpa',
+       '#aestheticnp','#aestheticpa','#aestheticnurse','#nurseinjector',
+       '#aestheticnursepractitioner','#injectorlife','#np_injector'],
+      ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
+       '#princetonmedspa','#morristownmedspa','#njinjector','#nycinjector',
+       '#njhydrafacial','#njmicroneedling','#njlaser','#njskincare'],
+      ['#newjerseymedspa','#njmedspa','#njbotox','#njfiller',
+       '#nycmedspa','#manhattanmedspa','#brooklynmedspa','#nycbotox','#nycfiller'],
+    ],
+    icpKeywords: [
+      'med spa','medspa','medical spa',
+      'aesthetics','esthetics','aesthetic medicine','aesthetic',
+      'injectables','injector','botox','filler','microneedling',
+      'laser','skincare','skin care','hydrafacial','anti-aging',
+      'body contouring','wellness clinic','iv therapy','hormone','skin clinic',
+      'regenerative','prp','exosome','thread lift','morpheus','sculpting',
+    ],
+    ownerSignals: [
+      'owner','founder','co-founder','cofounder','ceo','co-owner',
+      'my spa','my clinic','my practice','my studio','my medspa','my med spa',
+      'i own','we own','opened','established','founded','i started','i created',
+      'pa-c','fnp','fnp-c','dnp','aprn','np-c','physician','md ','do ','rn bsn',
+      'private practice','solo practice','my own practice',
+    ],
+    badCategories: ['makeup artist','tattoo','gym','fitness studio','yoga','pilates'],
+    softPassCategory: 'spa',
+    vendorSignalExtras: ['we help med spa','we help medspa','helping med spa','for med spas'],
+    googlePlacesType: 'med spa',
+  },
+
+  salon: {
+    label: 'Salon / Lash / Brow / Nail Studio',
+    hashtagGroups: [
+      ['#salonowner','#hairsalonowner','#lashliftowner','#browsalonowner',
+       '#nailsalonowner','#beautysuiteowner','#independentstylist',
+       '#boothrentlife','#suitesalon','#myownboss','#womenwhobuild'],
+      ['#njhairstylist','#nychairstylist','#njlashartist','#nyclashartist',
+       '#njbrowartist','#nycbrowartist','#njnails','#nycnails',
+       '#njsalon','#nycsalon','#hobokenhairstylist','#jerseycitystylist'],
+      ['#njlashes','#nyclashes','#njbrows','#nycbrows',
+       '#njkeratintreatment','#njhairextensions','#nychairextensions',
+       '#njbalayage','#nycbalayage','#njhaircolor','#njblowout'],
+      ['#lashliftandtint','#laminatedbrows','#microblading','#powderbrows',
+       '#gelxnails','#nailart','#newjerseysalon','#njbeauty','#nycbeauty'],
+    ],
+    icpKeywords: [
+      'salon','hair salon','lash','lashes','brow','brows','nail','nails',
+      'stylist','colorist','keratin','extensions','balayage','highlights',
+      'microblading','powder brows','brow lamination','lash lift','lash tint',
+      'beauty studio','beauty suite','suite salon','booth rental',
+      'hair care','blowout','haircut','color correction',
+    ],
+    ownerSignals: [
+      'owner','founder','co-founder','ceo','co-owner',
+      'my salon','my studio','my suite','my space','my chair',
+      'i own','we own','opened','established','founded','i started',
+      'independent stylist','booth renter','suite owner',
+      'licensed','cosmetologist','esthetician','lash tech','nail tech',
+    ],
+    badCategories: ['med spa','medspa','gym','fitness studio','yoga','pilates','tattoo'],
+    softPassCategory: 'salon',
+    vendorSignalExtras: ['for salons','helping salons','salon software','salon marketing'],
+    googlePlacesType: 'salon',
+  },
+
+  fitness: {
+    label: 'Gym / Yoga / Pilates Studio',
+    hashtagGroups: [
+      ['#gymowner','#yogastudioowner','#pilatesstudioowner','#fitnessstudioowner',
+       '#boutiquefitness','#independenttrainer','#mygym','#mystudio',
+       '#smallbizowner','#womenwhobuild'],
+      ['#njpilates','#nycpilates','#njyoga','#nycyoga','#njpersonaltrainer',
+       '#nycpersonaltrainer','#njfitness','#nycfitness',
+       '#njgym','#nycgym','#hobokenfitness','#jerseycityfitness'],
+      ['#reformerpilates','#njreformerpilates','#nycreformerpilates',
+       '#njbarre','#nycbarre','#njbootcamp','#nycbootcamp',
+       '#njcrossfit','#nyccrossfit','#njyogainstructor','#nycyogainstructor'],
+      ['#pilateslife','#yogalife','#personaltraining','#strengthandconditioning',
+       '#functionalfitness','#newjerseyfitness','#nyfitness','#njwellness'],
+    ],
+    icpKeywords: [
+      'gym','yoga','pilates','fitness','studio','workout','training',
+      'personal trainer','personal training','reformer','barre','spin',
+      'crossfit','bootcamp','strength','conditioning','wellness',
+      'movement','stretch','recovery','hiit','circuit',
+      'certified trainer','cpt','yoga instructor','ryt','e-ryt',
+    ],
+    ownerSignals: [
+      'owner','founder','co-founder','ceo','co-owner',
+      'my studio','my gym','my space','my classes',
+      'i own','we own','opened','established','founded','i started',
+      'certified','cpt','ryt','e-ryt','cscs','nasm','ace certified',
+      'head coach','head instructor','director',
+    ],
+    badCategories: ['med spa','medspa','nail salon','tattoo','hair salon'],
+    softPassCategory: 'fitness',
+    vendorSignalExtras: ['for gyms','gym software','fitness app','coaching platform'],
+    googlePlacesType: 'studio',
+  },
+};
 
 // ── Permanent exclusion list ──────────────────────────────────────────────────
 
@@ -37,37 +158,7 @@ const PERMANENT_EXCLUSIONS = new Set([
   'clinicgrower','medspaalliance','aestheticrecord',
 ]);
 
-// ── Hashtag groups ────────────────────────────────────────────────────────────
-//
-// TRACK B groups: credential/geo/treatment combos — finds owners in the ICP
-// but does NOT filter for collab intent. classifyTrack() assigns A/B after enrichment.
-// These are the original groups and remain the default for Track B discovery runs.
-//
-// ── Hashtag groups ────────────────────────────────────────────────────────────
-// Single unified discovery strategy. Track A/B classification happens after
-// enrichment via classifyTrack() which reads actual post captions and tagged
-// accounts — not at discovery time.
-const HASHTAG_GROUPS = [
-  // TIER 1: Owner-identity hashtags — highest signal, only actual owners use these
-  // These surface the real human behind the needle, not the business page
-  ['#medspaowner','#injectorowner','#medspafounder','#aestheticpracticeowner',
-   '#myownboss','#mymedicalspa','#mymymedspa','#ownedandoperated',
-   '#smallbizowner','#womenwhobuild'],
-  // TIER 2: Credential + location combos — licensed providers who own their practice
-  // NPs, PAs, RNs posting under their own name are almost always the owner
-  ['#njnurseinjector','#nycnurseinjector','#njnp','#njpa',
-   '#aestheticnp','#aestheticpa','#aestheticnurse','#nurseinjector',
-   '#aestheticnursepractitioner','#injectorlife','#np_injector'],
-  // TIER 3: NJ/NYC city-level treatment tags — still geo-specific, some biz pages but filterable
-  ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
-   '#princetonmedspa','#morristownmedspa','#njinjector','#nycinjector',
-   '#njhydrafacial','#njmicroneedling','#njlaser','#njskincare'],
-  // TIER 4: Broad geo — most likely to surface business pages; used last, filtered hardest
-  ['#newjerseymedspa','#njmedspa','#njbotox','#njfiller',
-   '#nycmedspa','#manhattanmedspa','#brooklynmedspa','#nycbotox','#nycfiller'],
-];
-
-// ── Geographic filter // ── Geographic filter ─────────────────────────────────────────────────────────
+// ── Geographic filter ─────────────────────────────────────────────────────────
 
 const GEO_REJECT = [
   'essex','london','manchester','birmingham','glasgow','edinburgh',
@@ -77,130 +168,86 @@ const GEO_REJECT = [
   'seattle','denver','atlanta','las vegas',
 ];
 
-const GEO_ACCEPT = [
-  'new jersey',' nj','new york',' nyc',' ny ',
-  'hoboken','jersey city','montclair','summit','princeton',
-  'morristown','westfield','ridgewood','short hills',
-  'manhattan','brooklyn','queens','bronx','staten island',
-  'long island','westchester','nassau','suffolk',
-];
-
 function isGeoMatch(bio: string | null | undefined, localSignals: string[]): boolean {
   const text = `${bio ?? ''} ${(localSignals ?? []).join(' ')}`.toLowerCase();
   if (GEO_REJECT.some(s => text.includes(s))) return false;
   return true;
 }
 
+// ── Universal first-person ownership phrases (all categories) ─────────────────
 
-const OWNER_SIGNALS = [
-  'owner','founder','co-founder','cofounder','ceo','co-owner',
-  'my spa','my clinic','my practice','my studio','my medspa','my med spa',
-  'i own','we own','opened','established','founded','i started','i created',
-  'pa-c','fnp','fnp-c','dnp','aprn','np-c','physician','md ','do ','rn bsn',
-  'private practice','solo practice','my own practice',
+const UNIVERSAL_FIRST_PERSON = [
+  'i own','we own','i founded','i opened','i started','i created',
+  'i am the owner',"i'm the owner",
+  'my studio','my practice','my salon','my spa','my gym','my clinic','my space','my suite',
 ];
 
 // ── Person vs. business page detection ───────────────────────────────────────
-// Business pages are run by marketing teams, not the owner directly.
-// DM response rates are near-zero for pure brand accounts.
-// We want the actual human who owns the needle.
 
 const PERSON_CREDENTIALS = [
   '\\bnp\\b','\\bpa\\b','\\brn\\b','\\bmd\\b','\\bdo\\b',
   '\\bdnp\\b','\\bfnp\\b','\\baprn\\b','\\bdc\\b',
   'pa-c','fnp-c','np-c','rn bsn','rn-bsn',
   'dmsc','dpm','pharmd','msn','bsn',
-  'lmt','LE ','le,',                 // licensed esthetician / massage therapist
+  'lmt','cpt','ryt','e-ryt','cscs',
 ];
-const BIZ_WORDS_IN_NAME = ['medspa','med spa','aesthetics','medical','clinic','center','studio','wellness','institute','llc','inc','laser','beauty','skincare','skin care'];
+
+const BIZ_WORDS_IN_NAME = [
+  'medspa','med spa','aesthetics','medical','clinic','center',
+  'studio','wellness','institute','llc','inc','laser',
+  'beauty','skincare','skin care','salon','fitness','gym','yoga','pilates',
+];
 
 function looksLikePersonName(displayName: string): boolean {
   if (!displayName) return false;
   const nameLower = displayName.toLowerCase();
 
-  // Credential suffix → definitely a person ("Sarah NP", "Dr. Kim PA-C")
   if (PERSON_CREDENTIALS.some(c => new RegExp(c, 'i').test(displayName))) return true;
-
-  // Dr. / Nurse / Injector prefix → person
   if (/^(dr\.?\s|nurse\s|injector\s)/i.test(displayName.trim())) return true;
 
-  // Count business words in display name
   const bizCount = BIZ_WORDS_IN_NAME.filter(w => nameLower.includes(w)).length;
-
-  // 2+ business words = business page ("Eminence Medical Aesthetics", "NJ Laser Center")
   if (bizCount >= 2) return false;
-
-  // 1 business word but has a personal separator ("Sarah | Aesthetics", "Kim · Medspa")
   if (bizCount === 1 && /[|·•—]/.test(displayName)) return true;
+  if (/'s\s/i.test(displayName)) return true;
 
-  // Possessive form = person's business ("Kim's Medspa", "Jessica's Studio")
-  if (/'\s*s\s/i.test(displayName)) return true;
-
-  // Single word with no credential — just a brand slug
   const words = displayName.trim().split(/\s+/);
   if (words.length === 1 && bizCount === 0) return false;
-
-  // 2–3 words, no business terms → likely a person name ("Sarah Jane", "Jessica Kim")
   if (words.length <= 3 && bizCount === 0) return true;
 
   return false;
 }
 
 const EMPLOYEE_PATTERNS = [
-  // "aesthetician @place" or "esthetician at @place"
-  /aesthetician\s+@/i,
-  /esthetician\s+@/i,
-  /injector\s+@/i,
-  /provider\s+@/i,
-  /specialist\s+@/i,
-  /expert\s+@/i,
-  /artist\s+@/i,
-  // "at @place" or "| @place"
+  /aesthetician\s+@/i, /esthetician\s+@/i, /injector\s+@/i,
+  /provider\s+@/i, /specialist\s+@/i, /expert\s+@/i, /artist\s+@/i,
+  /instructor\s+@/i, /trainer\s+@/i, /stylist\s+@/i,
   /\bat\s+@\w{3,}/i,
-  /\|\s*@\w+(medspa|spa|clinic|aesthetics|beauty|studio)/i,
-  // "working at" or "based at"
-  /working\s+at\s+@/i,
-  /based\s+at\s+@/i,
-  // "team member of" or "proud member"
-  /team\s+(member|of)\s+@/i,
-  /proud\s+(member|part)\s+of\s+@/i,
+  /\|\s*@\w+(medspa|spa|clinic|aesthetics|beauty|studio|salon|gym|fitness)/i,
+  /working\s+at\s+@/i, /based\s+at\s+@/i,
+  /team\s+(member|of)\s+@/i, /proud\s+(member|part)\s+of\s+@/i,
 ];
 
-const ICP_KEYWORDS = [
-  'med spa','medspa','medical spa',
-  'aesthetics','esthetics','aesthetic medicine','aesthetic',
-  'injectables','injector','botox','filler','microneedling',
-  'laser','skincare','skin care','hydrafacial','anti-aging',
-  'body contouring','wellness clinic','iv therapy','hormone','skin clinic',
-  'regenerative','prp','exosome','thread lift','morpheus','sculpting',
-];
+// ── isOwner — category-aware ──────────────────────────────────────────────────
 
-function isOwner(account: {
-  username: string; biography: string; displayName: string;
-  followersCount: number; isPrivate: boolean;
-  category?: string; isBusinessAccount?: boolean;
-}): { qualified: boolean; reason: string } {
+function isOwner(
+  account: {
+    username: string; biography: string; displayName: string;
+    followersCount: number; isPrivate: boolean;
+    category?: string; isBusinessAccount?: boolean;
+  },
+  cfg: CategoryConfig
+): { qualified: boolean; reason: string } {
   if (account.isPrivate) return { qualified: false, reason: 'private' };
   if (PERMANENT_EXCLUSIONS.has(account.username)) return { qualified: false, reason: 'exclusion list' };
   if (account.followersCount < 400 || account.followersCount > 150_000) {
     return { qualified: false, reason: `followers ${account.followersCount}` };
   }
 
-  // Hard gate: reject pure business pages up front.
-  // We are doing personal outreach — if the display name looks like a brand, not a person,
-  // response rates will be near-zero regardless of other signals.
   if (account.displayName && !looksLikePersonName(account.displayName)) {
-    // Allow through ONLY if the bio has first-person ownership language
-    // ("I own", "my spa", "my clinic", "founder", "owner") — some owners
-    // run under a business name but write personally in their bio.
     const bioLower = (account.biography ?? '').toLowerCase();
-    const hasFirstPersonOwnership =
-      bioLower.includes('i own') || bioLower.includes('my spa') ||
-      bioLower.includes('my clinic') || bioLower.includes('my practice') ||
-      bioLower.includes('i founded') || bioLower.includes('i opened') ||
-      bioLower.includes('founder') || bioLower.includes('i am the owner') ||
-      bioLower.includes("i'm the owner");
-    if (!hasFirstPersonOwnership) {
+    const hasFirstPerson = UNIVERSAL_FIRST_PERSON.some(s => bioLower.includes(s))
+      || bioLower.includes('founder') || bioLower.includes('established');
+    if (!hasFirstPerson) {
       return { qualified: false, reason: 'business page — no personal identity in name or bio' };
     }
   }
@@ -208,23 +255,21 @@ function isOwner(account: {
   const bio = (account.biography ?? '').toLowerCase();
   const name = (account.displayName ?? '').toLowerCase();
 
-  const badCategories = ['esthetician','makeup artist','hair salon','nail salon','tattoo'];
-  if (account.category && badCategories.some(c => account.category!.toLowerCase().includes(c))) {
+  if (account.category && cfg.badCategories.some(c => account.category!.toLowerCase().includes(c))) {
     return { qualified: false, reason: `category: ${account.category}` };
   }
 
-  // Reject vendor/agency/software bios
   const vendorSignals = [
-    'agency', 'software', 'saas', 'platform', 'app for', 'tool for',
-    'we help med spa', 'we help medspa', 'helping med spa', 'for med spas',
-    'marketing for', 'grow your', 'scale your', 'ai for',
-    'academy', 'course', 'coaching', 'consultant', 'distributor', 'supplier',
+    'agency','software','saas','platform','app for','tool for',
+    'marketing for','grow your','scale your','ai for',
+    'academy','course','coaching','consultant','distributor','supplier',
+    ...cfg.vendorSignalExtras,
   ];
   if (vendorSignals.some(v => bio.includes(v))) {
     return { qualified: false, reason: 'vendor/agency bio signal' };
   }
 
-  const hasIcp = ICP_KEYWORDS.some(kw => bio.includes(kw) || name.includes(kw));
+  const hasIcp = cfg.icpKeywords.some(kw => bio.includes(kw) || name.includes(kw));
   if (!hasIcp) return { qualified: false, reason: 'no ICP keyword' };
 
   if (!isGeoMatch(account.biography, [])) {
@@ -237,16 +282,12 @@ function isOwner(account: {
     }
   }
 
-  const hasOwner = OWNER_SIGNALS.some(sig => bio.includes(sig))
-    || /^[A-Z][a-zA-Z\s]+(Med Spa|Medspa|Aesthetics|Clinic|Studio|Wellness)/i.test(account.displayName ?? '');
+  const hasOwner = cfg.ownerSignals.some(sig => bio.includes(sig))
+    || /^[A-Z][a-zA-Z\s]+(Med Spa|Medspa|Aesthetics|Clinic|Studio|Wellness|Salon|Gym)/i.test(account.displayName ?? '');
 
   if (!hasOwner) {
-    // Soft pass: business account with spa category AND looks like a real person's account
-    // Requiring looksLikePersonName filters out pure brand pages (Eminence Medical Aesthetics,
-    // NJ Laser Center, etc.) that pass the business/follower/category checks but have no human
-    // identity behind them. DM response rates on those are near-zero.
     const softPass = account.isBusinessAccount && account.followersCount > 800
-      && (account.category ?? '').toLowerCase().includes('spa')
+      && (account.category ?? '').toLowerCase().includes(cfg.softPassCategory)
       && looksLikePersonName(account.displayName ?? '');
     if (!softPass) return { qualified: false, reason: 'no ownership signal or pure business page' };
   }
@@ -256,7 +297,6 @@ function isOwner(account: {
 
 // ── Track A/B classification ──────────────────────────────────────────────────
 
-// Known product/equipment brands — tagging these is NOT a local business collab
 const PRODUCT_BRANDS = new Set([
   'platedskinscience','skinbetter','allergan','hydrafacial','inmode',
   'galderma','merz','revance','botox','juvederm','restylane','sculptra',
@@ -266,12 +306,14 @@ const PRODUCT_BRANDS = new Set([
   'facerealityskincare','skinceuticals','obagi','zetaon','isdin',
   'colorescience','eltamd','sunbetter','latisse','xeomin','dysport',
   'radiesse','belotero','teoxane','stylage','perfectha',
+  'olaplex','redken','kerastase','schwarzkopf','loreal','wella','matrix',
+  'opi','cnd','essie','gelish','orly','dnd',
+  'lululemon','peloton','athleticgreens','ag1','whoop','garmin',
 ]);
 
 function classifyTrack(profile: {
   recentCaptions: string[]; collabSignals: string[]; bio: string;
 }): 'A' | 'B' {
-  // Only count tagged accounts that are NOT known product brands
   const localBusinessTags = profile.collabSignals.filter(
     handle => !PRODUCT_BRANDS.has(handle.toLowerCase().replace('@',''))
   );
@@ -279,8 +321,6 @@ function classifyTrack(profile: {
   const captionText = profile.recentCaptions.join(' ').toLowerCase();
   const bioLower = (profile.bio ?? '').toLowerCase();
 
-  // Phrases that indicate an ONGOING local business partnership
-  // (not one-off events or general collaboration language)
   const ongoingCollabPhrases = [
     'our partner', 'partnered with', 'partnership with',
     'collab with', 'collaboration with', 'referral partner',
@@ -288,31 +328,30 @@ function classifyTrack(profile: {
     'proud to partner', 'excited to partner',
   ];
 
-  // Phrases that indicate a one-off event/expo — NOT a Track A signal
   const oneOffEventPhrases = [
     'expo', 'event', 'pop-up', 'popup', 'conference', 'fair',
     'health fair', 'vendor', 'booth', 'join us at', 'come see us',
     'come find us', 'come visit', 'pulling up to', 'showing up at',
   ];
 
-  // Caption has collab language AND it's not just an expo appearance
   const captionHasOngoingCollab = ongoingCollabPhrases.some(p => captionText.includes(p))
     && !oneOffEventPhrases.some(p => captionText.includes(p));
 
-  // Bio explicitly signals openness to ongoing partnerships
   const bioHasCollab = [
     'collab', 'partnership', 'partner with us', 'open to collab',
     'open to partnerships', 'accepting collabs',
   ].some(p => bioLower.includes(p));
 
-  // Must have BOTH local business tags AND ongoing collab language to be Track A
-  // A tagged account alone (from expo, event, photo credit) is not enough
   const hasLocalPartnerWithContext = localBusinessTags.length > 0 && captionHasOngoingCollab;
 
   return (hasLocalPartnerWithContext || bioHasCollab) ? 'A' : 'B';
 }
 
 // ── Apify helpers ─────────────────────────────────────────────────────────────
+
+const APIFY_TOKEN   = process.env.APIFY_TOKEN!;
+const APIFY_ACTOR   = 'apify~instagram-scraper';
+const APIFY_BASE    = 'https://api.apify.com/v2';
 
 async function startRun(input: Record<string, unknown>): Promise<string> {
   const res = await fetch(`${APIFY_BASE}/acts/${APIFY_ACTOR}/runs?token=${APIFY_TOKEN}`, {
@@ -342,14 +381,11 @@ async function pollRun(runId: string, timeoutSecs = 120): Promise<unknown[]> {
   throw new Error(`Run ${runId} timed out`);
 }
 
-// ── Phase 1: Parallel hashtag scrape → lightweight candidate objects ──────────
+// ── Phase 1: Parallel hashtag scrape ─────────────────────────────────────────
 
 interface Phase1Candidate {
-  username: string;
-  displayName: string;
-  followersCount: number;
-  biography: string;    // may be empty if Apify doesn't return it on posts
-  isPrivate: boolean;
+  username: string; displayName: string;
+  followersCount: number; biography: string; isPrivate: boolean;
 }
 
 async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1Candidate[]> {
@@ -369,26 +405,15 @@ async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1
     runIds.map(id => id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[]))
   );
 
-  // Deduplicate by username — keep first occurrence
   const seen = new Set<string>();
   const candidates: Phase1Candidate[] = [];
 
   for (const items of results) {
     for (const item of items) {
       const post = item as {
-        ownerUsername?: string;
-        ownerFullName?: string;
-        biography?: string;
-        ownersFollowersCount?: number;
-        followersCount?: number;
-        isPrivate?: boolean;
-        owner?: {
-          username?: string;
-          fullName?: string;
-          biography?: string;
-          followersCount?: number;
-          isPrivate?: boolean;
-        };
+        ownerUsername?: string; ownerFullName?: string; biography?: string;
+        ownersFollowersCount?: number; followersCount?: number; isPrivate?: boolean;
+        owner?: { username?: string; fullName?: string; biography?: string; followersCount?: number; isPrivate?: boolean };
       };
 
       const username = post.ownerUsername ?? post.owner?.username ?? '';
@@ -413,66 +438,35 @@ async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1
   return candidates;
 }
 
-// ── Phase 1 (Track A): Keyword-based discovery ────────────────────────────────
-// Two parallel search paths hit Instagram's actual search index:
-//
-//   Hashtag search: search = 'med spa collab', searchType = 'hashtag'
-//     → Apify finds hashtags matching the keyword phrase, scrapes their posts,
-//       returns post objects with ownerUsername. Same parsing as getHandlesFromHashtags.
-//       Lower bio/follower data but covers content-based collab signals.
-//
-//   User search:   search = 'med spa NJ collab', searchType = 'user'
-//     → Apify queries Instagram's user directory and returns PROFILE objects directly.
-//       Bio and follower count are populated in Phase 1 (unlike hashtag scraping which
-//       returns bio=0 followers=0). Phase 1.5 pre-filter can therefore reject non-ICP
-//       accounts BEFORE spending Apify credits on Phase 2 enrichment.
-//
-// Why not use generic collab hashtags like #localcollab?
-// They pull in every type of business (shipping stores, coding events, gyms).
-// Keyword combos that cross CATEGORY × INTENT ensure both signals are present.
-
-// Category terms anchor searches to our ICP — prevents generic businesses slipping through
-const KEYWORD_CATEGORY = [
-  'med spa', 'medspa', 'aesthetics', 'injector', 'botox', 'filler',
-];
-
-// Intent terms surface accounts with active partnership behavior
-const KEYWORD_INTENT = [
-  'collab', 'partner', 'giveaway', 'event', 'pop up', 'open house',
-];
-
-// ── Phase 1.5: Pre-filter all candidates before expensive profile enrichment ───
-// Applies as much of isOwner() as possible from Phase 1 data.
-// Accounts without bio data get a soft pass — Phase 2 enrichment decides.
+// ── Phase 1.5: Pre-filter ─────────────────────────────────────────────────────
 
 function preFilter(
   candidate: Phase1Candidate,
-  knownHandles: Set<string>
+  knownHandles: Set<string>,
+  cfg: CategoryConfig
 ): { pass: boolean; reason: string } {
   if (knownHandles.has(candidate.username)) return { pass: false, reason: 'already known' };
   if (candidate.isPrivate) return { pass: false, reason: 'private' };
 
-  // Follower range only if we have data
   if (candidate.followersCount > 0) {
     if (candidate.followersCount < 400 || candidate.followersCount > 150_000) {
       return { pass: false, reason: `followers ${candidate.followersCount}` };
     }
   }
 
-  // Bio checks only if bio is present
   if (candidate.biography.length > 0) {
     const bio = candidate.biography.toLowerCase();
     const name = candidate.displayName.toLowerCase();
 
     const vendorSignals = [
       'agency','software','saas','platform','app for','tool for',
-      'we help med spa','we help medspa','helping med spa','for med spas',
       'marketing for','grow your','scale your','ai for',
       'academy','course','coaching','consultant','distributor','supplier',
+      ...cfg.vendorSignalExtras,
     ];
     if (vendorSignals.some(v => bio.includes(v))) return { pass: false, reason: 'vendor/agency' };
 
-    const hasIcp = ICP_KEYWORDS.some(kw => bio.includes(kw) || name.includes(kw));
+    const hasIcp = cfg.icpKeywords.some(kw => bio.includes(kw) || name.includes(kw));
     if (!hasIcp) return { pass: false, reason: 'no ICP keyword' };
 
     if (!isGeoMatch(candidate.biography, [])) return { pass: false, reason: 'non NJ/NYC geography' };
@@ -482,18 +476,11 @@ function preFilter(
     }
   }
 
-  // Hard person gate — same logic as isOwner().
-  // Business-page display names are rejected unless the bio has first-person ownership language.
-  // "owner" alone is not enough (many business bios say "Meet our owner!") — we require
-  // first-person phrasing to confirm the account IS the owner, not just references an owner.
   if (candidate.displayName.length > 0 && !looksLikePersonName(candidate.displayName)) {
     const bioLower = candidate.biography.toLowerCase();
-    const hasFirstPersonOwnership =
-      bioLower.includes('i own') || bioLower.includes('my spa') ||
-      bioLower.includes('my clinic') || bioLower.includes('my practice') ||
-      bioLower.includes('i founded') || bioLower.includes('i opened') ||
-      bioLower.includes('i am the owner') || bioLower.includes("i'm the owner");
-    if (!hasFirstPersonOwnership) {
+    const hasFirstPerson = UNIVERSAL_FIRST_PERSON.some(s => bioLower.includes(s))
+      || bioLower.includes('founder') || bioLower.includes('established');
+    if (!hasFirstPerson) {
       return { pass: false, reason: `business page display name: "${candidate.displayName}"` };
     }
   }
@@ -504,13 +491,10 @@ function preFilter(
   };
 }
 
-// ── Phase 2: Batch profile enrichment ─────────────────────────────────────────
+// ── Phase 2: Batch profile enrichment ────────────────────────────────────────
 
-// Google Reviews data fetched after Apify enrichment
 interface GoogleReviewData {
-  rating: number;           // overall star rating
-  totalRatings: number;     // total review count
-  highlights: string[];     // 2-3 review snippets mentioning the owner, technique, or results
+  rating: number; totalRatings: number; highlights: string[];
 }
 
 interface EnrichedProfile {
@@ -530,43 +514,35 @@ interface EnrichedProfile {
   googleReviews: GoogleReviewData | null;
 }
 
-// ── Phase 2.5: Google Reviews fetch ──────────────────────────────────────────
-// Uses Google Places Text Search + Place Details to find the business and
-// pull reviews. Only runs if GOOGLE_PLACES_API_KEY is set.
-// Gracefully skips if API key missing or business not found.
+// ── Phase 2.5: Google Reviews — category-aware search query ──────────────────
 
 const GOOGLE_PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY ?? '';
 
 async function fetchGoogleReviews(
   businessName: string,
-  city: string
+  city: string,
+  placeType: string
 ): Promise<GoogleReviewData | null> {
-  if (!GOOGLE_PLACES_KEY) return null;
-  if (!businessName || !city) return null;
+  if (!GOOGLE_PLACES_KEY || !businessName || !city) return null;
 
   try {
-    // Step 1: Text search to find the place_id
-    const query = encodeURIComponent(`${businessName} ${city} med spa`);
+    const query = encodeURIComponent(`${businessName} ${city} ${placeType}`);
     const searchRes = await fetch(
       `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${GOOGLE_PLACES_KEY}`
     );
     const searchData = await searchRes.json() as {
-      results?: Array<{ place_id: string; name: string; rating?: number; user_ratings_total?: number }>;
+      results?: Array<{ place_id: string }>;
       status: string;
     };
 
     if (!searchData.results?.length) return null;
-    const place = searchData.results[0];
-    const placeId = place.place_id;
 
-    // Step 2: Place Details to get reviews
     const detailRes = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=rating,user_ratings_total,reviews&key=${GOOGLE_PLACES_KEY}`
+      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${searchData.results[0].place_id}&fields=rating,user_ratings_total,reviews&key=${GOOGLE_PLACES_KEY}`
     );
     const detailData = await detailRes.json() as {
       result?: {
-        rating?: number;
-        user_ratings_total?: number;
+        rating?: number; user_ratings_total?: number;
         reviews?: Array<{ text: string; rating: number }>;
       };
     };
@@ -574,37 +550,28 @@ async function fetchGoogleReviews(
     const result = detailData.result;
     if (!result) return null;
 
-    const reviews = result.reviews ?? [];
-
-    // Extract highlights: sentences from 4-5 star reviews that mention something specific
-    // about the owner, a technique, a result, or a personal experience
     const highlightKeywords = [
-      'natural', 'listen', 'gentle', 'explain', 'honest', 'trust',
-      'result', 'before', 'after', 'amazing', 'transform', 'recommend',
-      'she', 'he', 'her', 'him', 'owner', 'dr.', 'nurse',
-      'botox', 'filler', 'lip', 'jawline', 'cheek', 'laser', 'hydrafacial',
+      'natural','listen','gentle','explain','honest','trust',
+      'result','before','after','amazing','transform','recommend',
+      'she','he','her','him','owner','dr.','nurse',
+      'botox','filler','laser','hydrafacial',
+      'color','balayage','lash','brow','nail',
+      'class','trainer','instructor','technique',
     ];
 
-    const highlights = reviews
+    const highlights = (result.reviews ?? [])
       .filter(r => r.rating >= 4)
       .map(r => {
-        // Split into sentences, find the most specific one
         const sentences = r.text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 20);
-        const best = sentences.find(s =>
-          highlightKeywords.some(kw => s.toLowerCase().includes(kw))
-        ) ?? sentences[0] ?? '';
-        return best.slice(0, 180); // cap length
+        const best = sentences.find(s => highlightKeywords.some(kw => s.toLowerCase().includes(kw))) ?? sentences[0] ?? '';
+        return best.slice(0, 180);
       })
       .filter(h => h.length > 20)
       .slice(0, 3);
 
     if (!result.rating && !highlights.length) return null;
 
-    return {
-      rating: result.rating ?? 0,
-      totalRatings: result.user_ratings_total ?? 0,
-      highlights,
-    };
+    return { rating: result.rating ?? 0, totalRatings: result.user_ratings_total ?? 0, highlights };
   } catch (err) {
     console.warn(`[scout] Google Reviews fetch failed for "${businessName}": ${err}`);
     return null;
@@ -619,8 +586,6 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
     directUrls: handles.map(h => `https://www.instagram.com/${h}/`),
     resultsType: 'details',
     resultsLimit: 1,
-    // Request enough posts to catch collab content that isn't in the last few posts.
-    // Default is ~12; we request 20 so classifyTrack() has a 6-month window to work with.
     extendOutputFunction: `($) => { return { latestPosts: $.latestPosts?.slice(0, 20) ?? [] }; }`,
   });
 
@@ -636,44 +601,36 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
       externalUrl?: string; highlightReelCount?: number;
       latestPosts?: Array<{
         type?: string; timestamp?: string; caption?: string;
-        hashtags?: string[];
-        url?: string; shortCode?: string;
+        hashtags?: string[]; url?: string; shortCode?: string;
         taggedUsers?: Array<{ username?: string }>;
         locationName?: string;
         coauthorProducers?: Array<{ username?: string }>;
-        // Explicitly NOT capturing: firstComment, latestComments, ownerUsername
-        // Comment authors are NOT collaborators and must never reach the analyst
       }>;
     };
 
     const now = Date.now();
     const posts = p.latestPosts ?? [];
 
-    const recentPosts = posts
-      .slice(0, 12)
-      .map(post => {
-        const ts = post.timestamp ? new Date(post.timestamp).getTime() : now;
-        const daysAgo = Math.round((now - ts) / 86_400_000);
-        const type = (post.type ?? '').toLowerCase().includes('reel') ? 'reel'
-          : (post.type ?? '').toLowerCase().includes('carousel') ? 'carousel' : 'photo';
-        const tagged = [
-          ...(post.taggedUsers ?? []).map(u => u.username ?? ''),
-          ...(post.coauthorProducers ?? []).map(u => u.username ?? ''),
-          // NOTE: latestComments and firstComment are intentionally excluded
-          // Comment authors are NOT business partners and must not appear in collabSignals
-        ].filter(Boolean).filter(u => !PERMANENT_EXCLUSIONS.has(u));
+    const recentPosts = posts.slice(0, 12).map(post => {
+      const ts = post.timestamp ? new Date(post.timestamp).getTime() : now;
+      const daysAgo = Math.round((now - ts) / 86_400_000);
+      const type = (post.type ?? '').toLowerCase().includes('reel') ? 'reel'
+        : (post.type ?? '').toLowerCase().includes('carousel') ? 'carousel' : 'photo';
+      const tagged = [
+        ...(post.taggedUsers ?? []).map(u => u.username ?? ''),
+        ...(post.coauthorProducers ?? []).map(u => u.username ?? ''),
+      ].filter(Boolean).filter(u => !PERMANENT_EXCLUSIONS.has(u));
 
-        return {
-          type: type as 'reel'|'photo'|'carousel',
-          daysAgo,
-          url: post.url ?? (post.shortCode ? `https://instagram.com/p/${post.shortCode}/` : ''),
-          captionSnippet: sanitize((post.caption ?? '').slice(0, 280)),
-          tagged,
-          location: sanitize(post.locationName ?? ''),
-          hashtags: (post.hashtags ?? []).slice(0, 8),
-        };
-      })
-      .filter(post => post.daysAgo <= 180); // Include posts from last 6 months — collab posts may not be recent
+      return {
+        type: type as 'reel'|'photo'|'carousel',
+        daysAgo,
+        url: post.url ?? (post.shortCode ? `https://instagram.com/p/${post.shortCode}/` : ''),
+        captionSnippet: sanitize((post.caption ?? '').slice(0, 280)),
+        tagged,
+        location: sanitize(post.locationName ?? ''),
+        hashtags: (post.hashtags ?? []).slice(0, 8),
+      };
+    }).filter(post => post.daysAgo <= 180);
 
     const recentCaptions = recentPosts.map(p => p.captionSnippet).filter(Boolean);
     const collabSignals = [...new Set(recentPosts.flatMap(p => p.tagged))].slice(0, 8);
@@ -701,16 +658,21 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
       collabSignals: sanitizeArr(collabSignals),
       localSignals: sanitizeArr(localSignals),
       contentThemes: sanitizeArr(contentThemes),
-      googleReviews: null, // Populated in Phase 2.5 after this batch returns
+      googleReviews: null,
     };
   }).filter(p => p.username !== '');
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<{
-  found: number; skipped: number; refusalReason?: string;
-}> {
+export async function runScout(
+  pool: Pool,
+  _discoveryMode?: 'A' | 'B',
+  category: IcpCategory = 'medspa'
+): Promise<{ found: number; skipped: number; refusalReason?: string }> {
+  const cfg = CATEGORY_CONFIG[category];
+  console.log(`[scout] Category: ${cfg.label}`);
+
   const today = new Date().toISOString().split('T')[0];
 
   const { rows: [memory] } = await pool.query<{
@@ -732,18 +694,14 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
 
   let phase1Candidates: Phase1Candidate[] = [];
   try {
-    phase1Candidates = await getHandlesFromHashtags(HASHTAG_GROUPS);
+    phase1Candidates = await getHandlesFromHashtags(cfg.hashtagGroups);
   } catch (err) {
     return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}` };
   }
 
-  // ── Phase 1.5: Pre-filter all candidates using available Phase 1 data ─────────
-  // This eliminates vendors, employees, wrong geo, and out-of-range follower counts
-  // BEFORE spending Apify credits on full profile enrichment.
-
   const preFilterResults = phase1Candidates.map(c => ({
     candidate: c,
-    ...preFilter(c, knownHandles),
+    ...preFilter(c, knownHandles, cfg),
   }));
 
   const passed = preFilterResults.filter(r => r.pass);
@@ -751,16 +709,13 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
 
   console.log(`[scout] Phase 1.5 pre-filter: ${passed.length} passed / ${rejected.length} rejected from ${phase1Candidates.length} total`);
 
-  // Log rejection reasons summary
   const reasons: Record<string, number> = {};
   for (const r of rejected) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
   console.log(`[scout] Rejection reasons: ${Object.entries(reasons).map(([k,v]) => `${k}=${v}`).join(', ')}`);
 
   if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length };
 
-  // Enrich every candidate that passed pre-filtering — no cap
   const toEnrich = passed.map(r => r.candidate.username);
-
   console.log(`[scout] Phase 2: enriching all ${toEnrich.length} pre-filtered profiles`);
 
   let profiles: EnrichedProfile[] = [];
@@ -774,9 +729,6 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
     console.log(`[scout] Categories: ${profiles.slice(0,5).map(p => `@${p.username}="${p.category}"`).join(', ')}`);
   }
 
-  // ── Phase 2.5: Google Reviews enrichment ────────────────────────────────────
-  // Fetch reviews for each qualified-looking profile in parallel (max 5 concurrent).
-  // We do this after Apify enrichment so we have the business name and city to search with.
   if (GOOGLE_PLACES_KEY && profiles.length > 0) {
     console.log(`[scout] Phase 2.5: fetching Google Reviews for ${profiles.length} profiles`);
     const reviewChunks: EnrichedProfile[][] = [];
@@ -784,13 +736,13 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
     for (const chunk of reviewChunks) {
       await Promise.all(chunk.map(async (profile) => {
         const city = profile.localSignals[0] ?? '';
-        const reviews = await fetchGoogleReviews(profile.displayName, city);
+        const reviews = await fetchGoogleReviews(profile.displayName, city, cfg.googlePlacesType);
         if (reviews) {
           profile.googleReviews = reviews;
           console.log(`[scout] Reviews @${profile.username}: ${reviews.rating}★ (${reviews.totalRatings} ratings)`);
         }
       }));
-      await sleep(500); // gentle rate limiting between chunks
+      await sleep(500);
     }
   }
 
@@ -799,12 +751,10 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
   for (const profile of profiles) {
     if (knownHandles.has(profile.username)) continue;
 
-    // Minimum post activity — inactive accounts aren't worth reaching out to
     if (profile.postsCount < 9) {
       console.log(`[scout] Skip @${profile.username}: too few posts (${profile.postsCount})`);
       continue;
     }
-    // Must have posted recently — check if any post is within 30 days
     const hasRecentPost = profile.recentPosts.some(p => p.daysAgo <= 60);
     if (!hasRecentPost && profile.recentPosts.length > 0) {
       console.log(`[scout] Skip @${profile.username}: no posts in last 60 days`);
@@ -816,10 +766,11 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
       displayName: profile.displayName, followersCount: profile.followersCount,
       isPrivate: profile.isPrivate, category: profile.category,
       isBusinessAccount: profile.isBusinessAccount,
-    });
+    }, cfg);
     if (!isQ) { console.log(`[scout] Skip @${profile.username}: ${reason}`); continue; }
+
     const track = classifyTrack({ recentCaptions: profile.recentCaptions, collabSignals: profile.collabSignals, bio: profile.biography });
-    console.log(`[scout] Qualified @${profile.username} (${profile.followersCount}f) → Track ${track}`);
+    console.log(`[scout] Qualified @${profile.username} (${profile.followersCount}f) [${category}] → Track ${track}`);
     qualified.push({ ...profile, track });
   }
 
@@ -828,8 +779,7 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
 
   for (const p of qualified) {
     const structuredPosts = p.recentPosts.map(post => ({
-      type: post.type, days_ago: post.daysAgo,
-      url: post.url,
+      type: post.type, days_ago: post.daysAgo, url: post.url,
       caption: post.captionSnippet,
       tagged: post.tagged, location: post.location, hashtags: post.hashtags,
     }));
@@ -845,21 +795,28 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
     `, [
       p.username, sanitize(p.displayName), sanitize(p.biography),
       p.followersCount, p.followsCount, p.postsCount,
-      `scout: ${HASHTAG_GROUPS.flat().slice(0,3).join(', ')}`,
+      `scout: ${cfg.hashtagGroups.flat().slice(0,3).join(', ')} [${category}]`,
       p.hasBookingLink, p.usesStories,
       JSON.stringify(p.recentCaptions),
       JSON.stringify(p.collabSignals),
       JSON.stringify(p.localSignals),
       JSON.stringify(p.contentThemes),
-      JSON.stringify({ track: p.track, structured_posts: structuredPosts, google_reviews: p.googleReviews ?? null }),
+      JSON.stringify({
+        track: p.track,
+        icp_category: category,
+        structured_posts: structuredPosts,
+        google_reviews: p.googleReviews ?? null,
+      }),
     ]);
 
     if (rowCount && rowCount > 0) {
       inserted++;
       insertedHandles.push(p.username);
-      await pool.query(`INSERT INTO activity_log (source, action, detail) VALUES ('scout','discovered',$1)`,
-        [`@${p.username} Track ${p.track} — ${p.followersCount} followers`]);
-      console.log(`[scout] Added @${p.username} Track ${p.track}`);
+      await pool.query(
+        `INSERT INTO activity_log (source, action, detail) VALUES ('scout','discovered',$1)`,
+        [`@${p.username} Track ${p.track} [${category}] — ${p.followersCount} followers`]
+      );
+      console.log(`[scout] Added @${p.username} Track ${p.track} [${category}]`);
     }
   }
 
@@ -872,7 +829,7 @@ export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<
     WHERE date = $3
   `, [inserted, JSON.stringify(insertedHandles), today]);
 
-  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
+  console.log(`[scout] Done [${category}]: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
   return { found: inserted, skipped: profiles.length - inserted };
 }
 

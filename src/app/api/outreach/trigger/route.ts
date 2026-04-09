@@ -1,13 +1,12 @@
 // ============================================================
 // src/app/api/outreach/trigger/route.ts
-// POST /api/outreach/trigger?job=radar|analyst|scout
-// Manual trigger for testing without waiting for the cron.
-// Protected — requires the same admin session as the dashboard.
+// POST /api/outreach/trigger?job=radar|analyst|scout[&category=medspa|salon|fitness]
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import { getSessionFromRequest } from '@/lib/auth';
+import type { IcpCategory } from '@/../workers/scout';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -16,15 +15,19 @@ const pool = new Pool({
 });
 
 export async function POST(req: NextRequest) {
-  // Auth check
   const authenticated = await getSessionFromRequest(req);
   if (!authenticated) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const job = req.nextUrl.searchParams.get('job') ?? 'radar';
-  const trackParam = req.nextUrl.searchParams.get('track');
-  const discoveryMode: 'A' | 'B' = trackParam === 'A' ? 'A' : 'B';
+
+  // Category for scout — defaults to medspa if not provided or invalid
+  const categoryParam = req.nextUrl.searchParams.get('category');
+  const category: IcpCategory =
+    categoryParam === 'salon' || categoryParam === 'fitness'
+      ? categoryParam
+      : 'medspa';
 
   if (!['radar', 'analyst', 'scout'].includes(job)) {
     return NextResponse.json(
@@ -38,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     if (job === 'scout') {
       const { runScout } = await import('@/../workers/scout');
-      result = await runScout(pool, discoveryMode);
+      result = await runScout(pool, undefined, category);
     }
 
     if (job === 'analyst') {
@@ -47,18 +50,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (job === 'radar') {
-      // Radar imports scout + analyst internally, so run inline here
-      // to keep it within the Next.js request lifecycle
       const { runAnalyst } = await import('@/../workers/analyst');
       const { runScout }   = await import('@/../workers/scout');
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Pipeline health
       const healthRes = await pool.query(`SELECT * FROM v_pipeline_health`);
       const h = healthRes.rows[0];
 
-      // Scout memory for gap check
       const scoutMemRes = await pool.query(
         `INSERT INTO scout_memory (date) VALUES ($1)
          ON CONFLICT (date) DO UPDATE SET date = EXCLUDED.date RETURNING *`,
@@ -80,9 +79,10 @@ export async function POST(req: NextRequest) {
       } else if (h.ready >= 1) {
         action = 'connect_prompt';
         detail = `${h.ready} prospect(s) ready in dashboard`;
-      } else if (h.discovered < 5 && sm.daily_discovery_count < 20) {
+      } else if (h.discovered < 5) {
         action = 'scout';
-        scoutStats = await runScout(pool);
+        // Radar uses medspa by default; manual trigger can specify category
+        scoutStats = await runScout(pool, undefined, category);
         detail = scoutStats.refusalReason
           ? `refused: ${scoutStats.refusalReason}`
           : `found=${scoutStats.found}`;
@@ -90,7 +90,6 @@ export async function POST(req: NextRequest) {
         detail = 'pipeline balanced';
       }
 
-      // Update radar memory
       await pool.query(
         `INSERT INTO radar_memory (date, runs_today, last_action, last_run)
          VALUES ($1, 1, $2, NOW())

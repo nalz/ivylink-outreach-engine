@@ -751,12 +751,12 @@ export default function OutreachPage() {
     }
   }, [loadQueue]);
 
-  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout') => {
-    const triggerKey = job;
+  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout', category?: string) => {
+    const triggerKey = job === 'scout' && category ? `scout-${category}` : job;
     setTriggering(triggerKey);
     setTriggerResult(null);
     try {
-      const url = `/api/outreach/trigger?job=${job}`;
+      const url = `/api/outreach/trigger?job=${job}${category ? `&category=${category}` : ''}`;
       const res = await fetch(url, { method: 'POST' });
       const data = await res.json() as { ok?: boolean; result?: Record<string, unknown>; error?: string };
       if (data.ok) {
@@ -765,7 +765,7 @@ export default function OutreachPage() {
           ? `action=${r.action} ${r.detail}`
           : job === 'analyst'
           ? `scored=${(r as {scored?:number}).scored ?? 0} dms=${(r as {dmsGenerated?:number}).dmsGenerated ?? 0} rejected=${(r as {rejected?:number}).rejected ?? 0}`
-          : `found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
+          : `[${category ?? 'medspa'}] found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
         setTriggerResult(`✓ ${summary}`);
         await loadQueue();
       } else {
@@ -885,9 +885,34 @@ export default function OutreachPage() {
 
           <div style={{ width: 1, height: 20, background: C.border, margin: '0 2px' }} />
 
-          <button onClick={() => handleTrigger('scout')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'scout' ? `${C.coral}22` : C.badge, border: `1px solid ${triggering === 'scout' ? C.coral : C.borderStrong}`, borderRadius: 6, color: triggering === 'scout' ? C.coral : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
-            {triggering === 'scout' ? 'Scouting...' : 'Run scout'}
-          </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 9, color: C.textDim, letterSpacing: '0.06em', fontWeight: 600, textTransform: 'uppercase' }}>Scout</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {([
+                { category: 'medspa',  label: 'Med Spa',  color: C.coral },
+                { category: 'salon',   label: 'Salon',    color: C.tangerine },
+                { category: 'fitness', label: 'Fitness',  color: '#7C9E87' },
+              ] as const).map(({ category, label, color }) => (
+                <button
+                  key={category}
+                  onClick={() => handleTrigger('scout', category)}
+                  disabled={!!triggering}
+                  style={{
+                    padding: '5px 10px',
+                    background: triggering === `scout-${category}` ? `${color}22` : C.badge,
+                    border: `1px solid ${triggering === `scout-${category}` ? color : C.borderStrong}`,
+                    borderRadius: 6,
+                    color: triggering === `scout-${category}` ? color : C.textMuted,
+                    fontSize: 11, fontWeight: 600,
+                    cursor: triggering ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', transition: 'all 0.15s',
+                  }}
+                >
+                  {triggering === `scout-${category}` ? `${label}...` : label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {triggerResult && (
             <span style={{ fontSize: 11, fontWeight: 500, color: triggerResult.startsWith('✓') ? C.green : C.red, marginLeft: 4 }}>
