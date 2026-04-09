@@ -1,17 +1,14 @@
 // ============================================================
-// middleware.ts — Route guard for all /outreach paths
-// ============================================================
-// Runs at the edge before any page renders.
-// Unauthenticated requests are redirected to /login.
+// middleware.ts — Route guard for all /outreach page paths
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionFromRequest } from '@/lib/auth';
 
-// Routes that are protected
-const PROTECTED_PREFIX = '/outreach';
+// Only the UI page is guarded here — API routes handle their own auth
+const PROTECTED_PAGES = ['/outreach'];
 
-// Routes that are always public (even if accidentally matched)
+// Routes that are always public
 const PUBLIC_ROUTES = new Set(['/login', '/api/auth/login', '/api/auth/logout']);
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
@@ -22,13 +19,17 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
-  // Protect all /outreach routes
-  if (pathname.startsWith(PROTECTED_PREFIX)) {
+  // Skip all API routes — they do their own auth and return proper 401s
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.next();
+  }
+
+  // Protect /outreach page
+  if (PROTECTED_PAGES.some(p => pathname.startsWith(p))) {
     const authenticated = await getSessionFromRequest(req);
 
     if (!authenticated) {
       const loginUrl = new URL('/login', req.url);
-      // Preserve the original destination so we can redirect back after login
       loginUrl.searchParams.set('next', pathname);
       return NextResponse.redirect(loginUrl);
     }
@@ -37,9 +38,8 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   return NextResponse.next();
 }
 
-// Only run middleware on app routes — skip static files and Next internals
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };
