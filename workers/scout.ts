@@ -52,18 +52,23 @@ const PERMANENT_EXCLUSIONS = new Set([
 // enrichment via classifyTrack() which reads actual post captions and tagged
 // accounts — not at discovery time.
 const HASHTAG_GROUPS = [
-  // NJ city-level — highest signal, almost exclusively local providers
+  // TIER 1: Owner-identity hashtags — highest signal, only actual owners use these
+  // These surface the real human behind the needle, not the business page
+  ['#medspaowner','#injectorowner','#medspafounder','#aestheticpracticeowner',
+   '#myownboss','#mymedicalspa','#mymymedspa','#ownedandoperated',
+   '#smallbizowner','#womenwhobuild'],
+  // TIER 2: Credential + location combos — licensed providers who own their practice
+  // NPs, PAs, RNs posting under their own name are almost always the owner
+  ['#njnurseinjector','#nycnurseinjector','#njnp','#njpa',
+   '#aestheticnp','#aestheticpa','#aestheticnurse','#nurseinjector',
+   '#aestheticnursepractitioner','#injectorlife','#np_injector'],
+  // TIER 3: NJ/NYC city-level treatment tags — still geo-specific, some biz pages but filterable
   ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
-   '#princetonmedspa','#morristownmedspa','#newjerseymedspa','#njmedspa','#njbotox','#njfiller'],
-  // NYC borough + suburb geo
-  ['#nycmedspa','#manhattanmedspa','#brooklynmedspa','#longislandmedspa',
-   '#westchestermedspa','#nycbotox','#nycfiller','#nycaesthetics','#njaesthetics'],
-  // Credential-based — licensed providers (NPs, PAs, RNs) who typically own their practice
-  ['#nurseinjector','#aestheticnurse','#aestheticnp','#aestheticpa',
-   '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
-  // Owner-identity + geo + treatment combos
-  ['#medspaowner','#injectorowner','#njinjector','#nycinjector',
-   '#njhydrafacial','#njmicroneedling','#njlaser','#nychydrafacial','#njskincare'],
+   '#princetonmedspa','#morristownmedspa','#njinjector','#nycinjector',
+   '#njhydrafacial','#njmicroneedling','#njlaser','#njskincare'],
+  // TIER 4: Broad geo — most likely to surface business pages; used last, filtered hardest
+  ['#newjerseymedspa','#njmedspa','#njbotox','#njfiller',
+   '#nycmedspa','#manhattanmedspa','#brooklynmedspa','#nycbotox','#nycfiller'],
 ];
 
 // ── Geographic filter // ── Geographic filter ─────────────────────────────────────────────────────────
@@ -176,6 +181,25 @@ function isOwner(account: {
     return { qualified: false, reason: `followers ${account.followersCount}` };
   }
 
+  // Hard gate: reject pure business pages up front.
+  // We are doing personal outreach — if the display name looks like a brand, not a person,
+  // response rates will be near-zero regardless of other signals.
+  if (account.displayName && !looksLikePersonName(account.displayName)) {
+    // Allow through ONLY if the bio has first-person ownership language
+    // ("I own", "my spa", "my clinic", "founder", "owner") — some owners
+    // run under a business name but write personally in their bio.
+    const bioLower = (account.biography ?? '').toLowerCase();
+    const hasFirstPersonOwnership =
+      bioLower.includes('i own') || bioLower.includes('my spa') ||
+      bioLower.includes('my clinic') || bioLower.includes('my practice') ||
+      bioLower.includes('i founded') || bioLower.includes('i opened') ||
+      bioLower.includes('founder') || bioLower.includes('i am the owner') ||
+      bioLower.includes("i'm the owner");
+    if (!hasFirstPersonOwnership) {
+      return { qualified: false, reason: 'business page — no personal identity in name or bio' };
+    }
+  }
+
   const bio = (account.biography ?? '').toLowerCase();
   const name = (account.displayName ?? '').toLowerCase();
 
@@ -220,13 +244,6 @@ function isOwner(account: {
       && (account.category ?? '').toLowerCase().includes('spa')
       && looksLikePersonName(account.displayName ?? '');
     if (!softPass) return { qualified: false, reason: 'no ownership signal or pure business page' };
-  }
-
-  // Final check: even with owner signals, reject pure business pages with no personal identity.
-  // A business page bio ("Award-winning Medspa | EST. 2013") with a brand display name
-  // is almost never the owner responding to DMs.
-  if (!looksLikePersonName(account.displayName ?? '') && !bio.includes('i ') && !bio.includes("my ")) {
-    return { qualified: false, reason: 'business page — no personal identity in name or bio' };
   }
 
   return { qualified: true, reason: 'passed' };
@@ -460,19 +477,18 @@ function preFilter(
     }
   }
 
-  // Person vs. business page check — run whenever we have a display name.
-  // looksLikePersonName is cheap (regex only) so there is no reason to defer it to Phase 2.
-  // For Track A user searches, displayName is always populated. For hashtag scrapes it is
-  // often populated too. We only reject if displayName is present AND fails — empty names
-  // get a soft pass since Phase 2 enrichment will decide with full profile data.
+  // Hard person gate — same logic as isOwner().
+  // Business-page display names are rejected unless the bio has first-person ownership language.
+  // "owner" alone is not enough (many business bios say "Meet our owner!") — we require
+  // first-person phrasing to confirm the account IS the owner, not just references an owner.
   if (candidate.displayName.length > 0 && !looksLikePersonName(candidate.displayName)) {
-    // Allow through if bio has strong personal ownership signals —
-    // some owners run under a business name but write "I own" in their bio
     const bioLower = candidate.biography.toLowerCase();
-    const hasPersonalBio = bioLower.includes('i own') || bioLower.includes('my spa') ||
+    const hasFirstPersonOwnership =
+      bioLower.includes('i own') || bioLower.includes('my spa') ||
       bioLower.includes('my clinic') || bioLower.includes('my practice') ||
-      bioLower.includes('founder') || bioLower.includes('owner');
-    if (!hasPersonalBio) {
+      bioLower.includes('i founded') || bioLower.includes('i opened') ||
+      bioLower.includes('i am the owner') || bioLower.includes("i'm the owner");
+    if (!hasFirstPersonOwnership) {
       return { pass: false, reason: `business page display name: "${candidate.displayName}"` };
     }
   }

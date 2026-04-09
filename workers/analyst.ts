@@ -312,8 +312,8 @@ export async function runAnalyst(pool: Pool): Promise<{
       );
 
       if (hasContent) {
-        // Truncate style codes — schema expects short strings, Claude returns e.g. "A3", "B2"
-        const s = (v: string | null) => v ? v.slice(0, 10) : null;
+        // Truncate style codes — schema expects short strings, max 15 chars to fit "bio_fallback"
+        const s = (v: string | null) => v ? v.slice(0, 15) : null;
         // Store post_comment_url in generation_notes so UI can link to correct post
         const generationNotes = JSON.stringify({
           notes: result.content.generation_notes,
