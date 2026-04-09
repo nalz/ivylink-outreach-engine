@@ -26,10 +26,6 @@ const APIFY_TOKEN   = process.env.APIFY_TOKEN!;
 const APIFY_ACTOR   = 'apify~instagram-scraper';
 const APIFY_BASE    = 'https://api.apify.com/v2';
 
-const MAX_PROFILE_LOOKUPS = 80;  // handles to enrich in Phase 2
-const DAILY_LIMIT         = 60;  // raised — more headroom as quality improves
-const MIN_GAP_MINUTES     = 25;
-
 // ── Permanent exclusion list ──────────────────────────────────────────────────
 
 const PERMANENT_EXCLUSIONS = new Set([
@@ -714,20 +710,6 @@ export async function runScout(pool: Pool): Promise<{
     last_run: string | null;
   }>(`INSERT INTO scout_memory (date) VALUES ($1) ON CONFLICT (date) DO UPDATE SET date = EXCLUDED.date RETURNING *`, [today]);
 
-  if (memory.last_run) {
-    const gapMin = (Date.now() - new Date(memory.last_run).getTime()) / 60_000;
-    if (gapMin < MIN_GAP_MINUTES) {
-      const reason = `Gap check: ${Math.round(gapMin)}m ago (min ${MIN_GAP_MINUTES}m)`;
-      console.log(`[scout] Refused: ${reason}`);
-      await pool.query(`UPDATE scout_memory SET refused_runs = refused_runs + 1, updated_at = NOW() WHERE date = $1`, [today]);
-      return { found: 0, skipped: 0, refusalReason: reason };
-    }
-  }
-
-  if (memory.daily_discovery_count >= DAILY_LIMIT) {
-    return { found: 0, skipped: 0, refusalReason: `Daily limit ${memory.daily_discovery_count}/${DAILY_LIMIT}` };
-  }
-
   await pool.query(`UPDATE scout_memory SET last_run = NOW(), updated_at = NOW() WHERE date = $1`, [today]);
 
   console.log(`[scout] Phase 1: starting discovery run`);
@@ -767,14 +749,10 @@ export async function runScout(pool: Pool): Promise<{
 
   if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length };
 
-  // Shuffle passed candidates — get variety across runs
-  // Then take up to MAX_PROFILE_LOOKUPS for Phase 2 enrichment
-  const toEnrich = passed
-    .map(r => r.candidate.username)
-    .sort(() => Math.random() - 0.5)
-    .slice(0, MAX_PROFILE_LOOKUPS);
+  // Enrich every candidate that passed pre-filtering — no cap
+  const toEnrich = passed.map(r => r.candidate.username);
 
-  console.log(`[scout] Phase 2: enriching ${toEnrich.length} pre-filtered profiles (${passed.length - toEnrich.length} passed but not enriched this run)`);
+  console.log(`[scout] Phase 2: enriching all ${toEnrich.length} pre-filtered profiles`);
 
   let profiles: EnrichedProfile[] = [];
   try {
@@ -885,7 +863,7 @@ export async function runScout(pool: Pool): Promise<{
     WHERE date = $3
   `, [inserted, JSON.stringify(insertedHandles), today]);
 
-  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${toEnrich.length} to enrich / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
+  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
   return { found: inserted, skipped: profiles.length - inserted };
 }
 

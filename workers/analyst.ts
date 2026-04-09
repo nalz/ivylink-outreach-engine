@@ -18,7 +18,6 @@ const client = new Anthropic({
 });
 
 const MODEL = 'claude-sonnet-4-5';
-const MAX_PROSPECTS_PER_RUN = 30; // handle a full scout batch in one run
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -140,8 +139,7 @@ export async function runAnalyst(pool: Pool): Promise<{
     FROM prospects
     WHERE status IN ('discovered', 'enriched')
     ORDER BY discovered_at ASC
-    LIMIT $1
-  `, [MAX_PROSPECTS_PER_RUN]);
+  `, []);
 
   if (prospects.length === 0) {
     console.log('[analyst] No prospects to process');
