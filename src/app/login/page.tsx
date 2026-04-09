@@ -756,11 +756,11 @@ export default function OutreachPage() {
   }, [loadQueue]);
 
   const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout') => {
-    const triggerKey = job === 'scout' && track ? `scout-${track}` : job;
+    const triggerKey = job;
     setTriggering(triggerKey);
     setTriggerResult(null);
     try {
-      const url = `/api/outreach/trigger?job=${job}${track ? `&track=${track}` : ''}`;
+      const url = `/api/outreach/trigger?job=${job}`;
       const res = await fetch(url, { method: 'POST' });
       const data = await res.json() as { ok?: boolean; result?: Record<string, unknown>; error?: string };
       if (data.ok) {
@@ -769,7 +769,7 @@ export default function OutreachPage() {
           ? `action=${r.action} ${r.detail}`
           : job === 'analyst'
           ? `scored=${(r as {scored?:number}).scored ?? 0} dms=${(r as {dmsGenerated?:number}).dmsGenerated ?? 0} rejected=${(r as {rejected?:number}).rejected ?? 0}`
-          : `[Track ${(r as {discoveryMode?:string}).discoveryMode ?? track}] found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
+          : `found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
         setTriggerResult(`✓ ${summary}`);
         await loadQueue();
       } else {
