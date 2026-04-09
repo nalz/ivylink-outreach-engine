@@ -751,12 +751,12 @@ export default function OutreachPage() {
     }
   }, [loadQueue]);
 
-  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout', track?: 'A' | 'B') => {
-    const triggerKey = job === 'scout' && track ? `scout-${track}` : job;
+  const handleTrigger = useCallback(async (job: 'radar' | 'analyst' | 'scout') => {
+    const triggerKey = job;
     setTriggering(triggerKey);
     setTriggerResult(null);
     try {
-      const url = `/api/outreach/trigger?job=${job}${track ? `&track=${track}` : ''}`;
+      const url = `/api/outreach/trigger?job=${job}`;
       const res = await fetch(url, { method: 'POST' });
       const data = await res.json() as { ok?: boolean; result?: Record<string, unknown>; error?: string };
       if (data.ok) {
@@ -765,7 +765,7 @@ export default function OutreachPage() {
           ? `action=${r.action} ${r.detail}`
           : job === 'analyst'
           ? `scored=${(r as {scored?:number}).scored ?? 0} dms=${(r as {dmsGenerated?:number}).dmsGenerated ?? 0} rejected=${(r as {rejected?:number}).rejected ?? 0}`
-          : `[Track ${(r as {discoveryMode?:string}).discoveryMode ?? track}] found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
+          : `found=${(r as {found?:number}).found ?? 0}${(r as {refusalReason?:string}).refusalReason ? ` (refused: ${(r as {refusalReason?:string}).refusalReason})` : ''}`;
         setTriggerResult(`✓ ${summary}`);
         await loadQueue();
       } else {
@@ -885,19 +885,9 @@ export default function OutreachPage() {
 
           <div style={{ width: 1, height: 20, background: C.border, margin: '0 2px' }} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <button onClick={() => handleTrigger('scout', 'A')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'scout-A' ? `${C.tangerine}22` : C.badge, border: `1px solid ${triggering === 'scout-A' ? C.tangerine : C.borderStrong}`, borderRadius: 6, color: triggering === 'scout-A' ? C.tangerine : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 5 }}>
-              {triggering === 'scout-A' ? 'Scouting A...' : <><span>Scout</span><span style={{ padding: '1px 5px', background: `${C.tangerine}33`, border: `1px solid ${C.tangerine}55`, borderRadius: 3, fontSize: 9, fontWeight: 800, color: C.tangerine, letterSpacing: '0.08em' }}>A</span></>}
-            </button>
-            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>partner intent</span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <button onClick={() => handleTrigger('scout', 'B')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'scout-B' ? `${C.coral}22` : C.badge, border: `1px solid ${triggering === 'scout-B' ? C.coral : C.borderStrong}`, borderRadius: 6, color: triggering === 'scout-B' ? C.coral : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 5 }}>
-              {triggering === 'scout-B' ? 'Scouting B...' : <><span>Scout</span><span style={{ padding: '1px 5px', background: `${C.coral}33`, border: `1px solid ${C.coral}55`, borderRadius: 3, fontSize: 9, fontWeight: 800, color: C.coral, letterSpacing: '0.08em' }}>B</span></>}
-            </button>
-            <span style={{ fontSize: 9, color: C.textDim, textAlign: 'center', letterSpacing: '0.04em' }}>owner category</span>
-          </div>
+          <button onClick={() => handleTrigger('scout')} disabled={!!triggering} style={{ padding: '5px 14px', background: triggering === 'scout' ? `${C.coral}22` : C.badge, border: `1px solid ${triggering === 'scout' ? C.coral : C.borderStrong}`, borderRadius: 6, color: triggering === 'scout' ? C.coral : C.textMuted, fontSize: 11, fontWeight: 600, cursor: triggering ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>
+            {triggering === 'scout' ? 'Scouting...' : 'Run scout'}
+          </button>
 
           {triggerResult && (
             <span style={{ fontSize: 11, fontWeight: 500, color: triggerResult.startsWith('✓') ? C.green : C.red, marginLeft: 4 }}>
