@@ -93,10 +93,11 @@ function isGeoMatch(bio: string | null | undefined, localSignals: string[]): boo
 
 
 const OWNER_SIGNALS = [
-  'owner','founder','co-founder','cofounder','ceo',
-  'my spa','my clinic','my practice','my studio','my medspa',
-  'i own','we own','opened','established','founded',
+  'owner','founder','co-founder','cofounder','ceo','co-owner',
+  'my spa','my clinic','my practice','my studio','my medspa','my med spa',
+  'i own','we own','opened','established','founded','i started','i created',
   'pa-c','fnp','fnp-c','dnp','aprn','np-c','physician','md ','do ','rn bsn',
+  'private practice','solo practice','my own practice',
 ];
 
 // ── Person vs. business page detection ───────────────────────────────────────
@@ -104,7 +105,13 @@ const OWNER_SIGNALS = [
 // DM response rates are near-zero for pure brand accounts.
 // We want the actual human who owns the needle.
 
-const PERSON_CREDENTIALS = ['\\bnp\\b','\\bpa\\b','\\brn\\b','\\bmd\\b','\\bdo\\b','\\bdnp\\b','\\bfnp\\b','\\baprn\\b','pa-c','fnp-c','np-c','rn bsn'];
+const PERSON_CREDENTIALS = [
+  '\\bnp\\b','\\bpa\\b','\\brn\\b','\\bmd\\b','\\bdo\\b',
+  '\\bdnp\\b','\\bfnp\\b','\\baprn\\b','\\bdc\\b',
+  'pa-c','fnp-c','np-c','rn bsn','rn-bsn',
+  'dmsc','dpm','pharmd','msn','bsn',
+  'lmt','LE ','le,',                 // licensed esthetician / massage therapist
+];
 const BIZ_WORDS_IN_NAME = ['medspa','med spa','aesthetics','medical','clinic','center','studio','wellness','institute','llc','inc','laser','beauty','skincare','skin care'];
 
 function looksLikePersonName(displayName: string): boolean {
@@ -160,10 +167,12 @@ const EMPLOYEE_PATTERNS = [
 ];
 
 const ICP_KEYWORDS = [
-  'med spa','medspa','medical spa','aesthetics','esthetics',
+  'med spa','medspa','medical spa',
+  'aesthetics','esthetics','aesthetic medicine','aesthetic',
   'injectables','injector','botox','filler','microneedling',
-  'laser','skincare','hydrafacial','anti-aging','body contouring',
-  'wellness clinic','iv therapy','hormone','skin clinic',
+  'laser','skincare','skin care','hydrafacial','anti-aging',
+  'body contouring','wellness clinic','iv therapy','hormone','skin clinic',
+  'regenerative','prp','exosome','thread lift','morpheus','sculpting',
 ];
 
 function isOwner(account: {
