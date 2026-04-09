@@ -47,59 +47,26 @@ const PERMANENT_EXCLUSIONS = new Set([
 // but does NOT filter for collab intent. classifyTrack() assigns A/B after enrichment.
 // These are the original groups and remain the default for Track B discovery runs.
 //
-// TRACK A groups: intent-first — searches for partner/collab language directly.
-// Surfaces accounts actively signaling cross-business partnerships right now.
-// Lower volume, much higher collab-signal density. Use for Track A targeted runs.
-
-const TRACK_B_HASHTAG_GROUPS = [
+// ── Hashtag groups ────────────────────────────────────────────────────────────
+// Single unified discovery strategy. Track A/B classification happens after
+// enrichment via classifyTrack() which reads actual post captions and tagged
+// accounts — not at discovery time.
+const HASHTAG_GROUPS = [
   // NJ city-level — highest signal, almost exclusively local providers
   ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
    '#princetonmedspa','#morristownmedspa','#newjerseymedspa','#njmedspa','#njbotox','#njfiller'],
   // NYC borough + suburb geo
   ['#nycmedspa','#manhattanmedspa','#brooklynmedspa','#longislandmedspa',
    '#westchestermedspa','#nycbotox','#nycfiller','#nycaesthetics','#njaesthetics'],
-  // Geo + treatment combos
-  ['#njhydrafacial','#njmicroneedling','#njlaser','#nychydrafacial',
-   '#nycmicroneedling','#nycskincare','#njskincare','#njinjector','#nycinjector'],
   // Credential-based — licensed providers (NPs, PAs, RNs) who typically own their practice
-  // Narrow enough that most posters are the actual provider, not clients or vendors
   ['#nurseinjector','#aestheticnurse','#aestheticnp','#aestheticpa',
    '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
+  // Owner-identity + geo + treatment combos
+  ['#medspaowner','#injectorowner','#njinjector','#nycinjector',
+   '#njhydrafacial','#njmicroneedling','#njlaser','#nychydrafacial','#njskincare'],
 ];
 
-// Track A uses the same category-anchored hashtags as Track B to find med spa owners,
-// with a small set of aesthetics-specific collab tags added.
-//
-// KEY LESSON FROM PRODUCTION: Generic partner-intent hashtags (#localcollab,
-// #businesscollab, #smallbizcollab) pull in every type of small business — shipping
-// stores, coding events, gyms, hair salons. The ICP filter correctly rejects them
-// but wastes 80 Apify profile lookups per run.
-//
-// The Track A/B distinction is a CONTENT classification (done by classifyTrack()
-// after Apify enrichment), not a discovery distinction. You can only find med spa
-// owners reliably by searching med-spa-specific hashtags. classifyTrack() then
-// identifies which of those owners are already collab-active (Track A) vs not (Track B).
-const TRACK_A_HASHTAG_GROUPS = [
-  // Same NJ city-level geo tags as Track B — highest signal for finding actual providers
-  ['#hobokenmedspa','#jerseycitymedspa','#montclairmedspa','#summitmedspa',
-   '#princetonmedspa','#morristownmedspa','#newjerseymedspa','#njmedspa','#njbotox','#njfiller'],
-  // Same NYC borough + suburb geo as Track B
-  ['#nycmedspa','#manhattanmedspa','#brooklynmedspa','#longislandmedspa',
-   '#westchestermedspa','#nycbotox','#nycfiller','#nycaesthetics','#njaesthetics'],
-  // Credential-based — same as Track B, these are almost always real owners
-  ['#nurseinjector','#aestheticnurse','#aestheticnp','#aestheticpa',
-   '#njnurseinjector','#nycnurseinjector','#njnp','#njpa','#aestheticnursepractitioner'],
-  // Aesthetics-specific collab tags — low volume but highly on-ICP
-  // These are the only intent tags worth including because they are category-anchored
-  ['#medspacollab','#aestheticscollab','#injectorcollab','#medspapartner',
-   '#aestheticspartner','#njaesthetics','#njinjector','#nycinjector',
-   '#medspaevent','#aestheticsevent'],
-];
-
-// Backward-compatible alias — keeps existing code paths that reference HASHTAG_GROUPS working
-const HASHTAG_GROUPS = TRACK_B_HASHTAG_GROUPS;
-
-// ── Geographic filter ─────────────────────────────────────────────────────────
+// ── Geographic filter // ── Geographic filter ─────────────────────────────────────────────────────────
 
 const GEO_REJECT = [
   'essex','london','manchester','birmingham','glasgow','edinburgh',
@@ -452,135 +419,6 @@ const KEYWORD_INTENT = [
   'collab', 'partner', 'giveaway', 'event', 'pop up', 'open house',
 ];
 
-// Hashtag search combos: category + intent → Apify finds matching hashtags → posts
-// Run as searchType='hashtag'. One run per combo.
-// Trimmed to highest-signal terms only.
-// Free Apify plan cap: 8192MB total across all concurrent runs.
-// Each run requests 1024MB, so max 8 concurrent runs safely (leaving headroom).
-// We run in sequential batches of 3 to stay well under the ceiling.
-const HASHTAG_SEARCH_TERMS = [
-  'med spa collab',     // highest intent signal
-  'med spa partner',
-  'aesthetics collab',
-  'injector collab',
-  'medspa collab',
-];
-
-// User search returns profiles with bio/followers already populated.
-// Kept to highest-signal geo + category combos only.
-const USER_SEARCH_TERMS = [
-  'medspa owner NJ',
-  'injector NJ',
-  'medspa owner NYC',
-  'injector NYC',
-  'aesthetics NJ collab',
-];
-
-// Run a list of Apify search terms in sequential batches to stay under
-// the free plan memory ceiling (8192MB, 1024MB per run = max 8 concurrent).
-async function runInBatches(
-  terms: string[],
-  buildInput: (term: string) => Record<string, unknown>,
-  batchSize = 3,
-  label = 'batch',
-): Promise<unknown[][]> {
-  const allResults: unknown[][] = [];
-  for (let i = 0; i < terms.length; i += batchSize) {
-    const batch = terms.slice(i, i + batchSize);
-    console.log(`[scout] ${label}: running batch ${Math.floor(i / batchSize) + 1} — ${batch.join(', ')}`);
-    const runIds = await Promise.all(
-      batch.map(term =>
-        startRun(buildInput(term))
-          .catch(err => { console.error(`[scout] Run start error (${term}):`, err); return null; })
-      )
-    );
-    const results = await Promise.all(
-      runIds.map(id =>
-        id ? pollRun(id, 120).catch(() => [] as unknown[]) : Promise.resolve([] as unknown[])
-      )
-    );
-    allResults.push(...results);
-    if (i + batchSize < terms.length) await sleep(2000); // brief pause between batches
-  }
-  return allResults;
-}
-
-async function getHandlesFromKeywords(): Promise<Phase1Candidate[]> {
-  console.log(`[scout] Phase 1 (Track A): ${HASHTAG_SEARCH_TERMS.length} hashtag + ${USER_SEARCH_TERMS.length} user searches in batches of 3`);
-
-  // Run hashtag searches then user searches sequentially (batches of 3 each)
-  const hashtagResults = await runInBatches(
-    HASHTAG_SEARCH_TERMS,
-    term => ({ search: term, searchType: 'hashtag', searchLimit: 5, resultsLimit: 20 }),
-    3,
-    'hashtag search',
-  );
-
-  const userResults = await runInBatches(
-    USER_SEARCH_TERMS,
-    term => ({ search: term, searchType: 'user', searchLimit: 20 }),
-    3,
-    'user search',
-  );
-
-  const seen = new Set<string>();
-  const candidates: Phase1Candidate[] = [];
-  let userProfileCount = 0;
-  let hashtagPostCount = 0;
-
-  // ── Parse hashtag search results (post objects, same shape as getHandlesFromHashtags) ──
-  for (const items of hashtagResults) {
-    hashtagPostCount += items.length;
-    for (const item of items) {
-      const post = item as {
-        ownerUsername?: string; ownerFullName?: string;
-        biography?: string; ownersFollowersCount?: number;
-        followersCount?: number; isPrivate?: boolean;
-        owner?: { username?: string; fullName?: string; biography?: string; followersCount?: number; isPrivate?: boolean };
-      };
-      const username = post.ownerUsername ?? post.owner?.username ?? '';
-      if (!username || seen.has(username) || PERMANENT_EXCLUSIONS.has(username)) continue;
-      seen.add(username);
-      candidates.push({
-        username,
-        displayName: post.ownerFullName ?? post.owner?.fullName ?? '',
-        biography: post.biography ?? post.owner?.biography ?? '',
-        followersCount: post.ownersFollowersCount ?? post.followersCount ?? post.owner?.followersCount ?? 0,
-        isPrivate: post.isPrivate ?? post.owner?.isPrivate ?? false,
-      });
-    }
-  }
-
-  // ── Parse user search results (profile objects — bio/followers populated!) ────
-  // searchType='user' returns Instagram user profiles directly, not posts.
-  // This means Phase 1.5 pre-filter can check ICP keywords and reject non-med-spa
-  // accounts before we spend Apify credits on Phase 2 enrichment.
-  for (const items of userResults) {
-    for (const item of items) {
-      const user = item as {
-        username?: string; fullName?: string; biography?: string;
-        followersCount?: number; isPrivate?: boolean;
-        // User search results may also return these
-        postsCount?: number; isBusinessAccount?: boolean;
-      };
-      const username = user.username ?? '';
-      if (!username || seen.has(username) || PERMANENT_EXCLUSIONS.has(username)) continue;
-      seen.add(username);
-      userProfileCount++;
-      candidates.push({
-        username,
-        displayName: user.fullName ?? '',
-        biography: user.biography ?? '',        // populated — no bio=0 problem
-        followersCount: user.followersCount ?? 0, // populated — no followers=0 problem
-        isPrivate: user.isPrivate ?? false,
-      });
-    }
-  }
-
-  console.log(`[scout] Phase 1 (Track A): ${candidates.length} unique accounts — ${userProfileCount} from user search (bio+followers populated), ${candidates.length - userProfileCount} from hashtag posts (${hashtagPostCount} total posts scanned)`);
-  return candidates;
-}
-
 // ── Phase 1.5: Pre-filter all candidates before expensive profile enrichment ───
 // Applies as much of isOwner() as possible from Phase 1 data.
 // Accounts without bio data get a soft pass — Phase 2 enrichment decides.
@@ -760,6 +598,9 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
     directUrls: handles.map(h => `https://www.instagram.com/${h}/`),
     resultsType: 'details',
     resultsLimit: 1,
+    // Request enough posts to catch collab content that isn't in the last few posts.
+    // Default is ~12; we request 20 so classifyTrack() has a 6-month window to work with.
+    extendOutputFunction: `($) => { return { latestPosts: $.latestPosts?.slice(0, 20) ?? [] }; }`,
   });
 
   const items = await pollRun(runId, 180);
@@ -788,7 +629,7 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
     const posts = p.latestPosts ?? [];
 
     const recentPosts = posts
-      .slice(0, 6)
+      .slice(0, 12)
       .map(post => {
         const ts = post.timestamp ? new Date(post.timestamp).getTime() : now;
         const daysAgo = Math.round((now - ts) / 86_400_000);
@@ -811,7 +652,7 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
           hashtags: (post.hashtags ?? []).slice(0, 8),
         };
       })
-      .filter(post => post.daysAgo <= 60); // Only include posts from last 60 days
+      .filter(post => post.daysAgo <= 180); // Include posts from last 6 months — collab posts may not be recent
 
     const recentCaptions = recentPosts.map(p => p.captionSnippet).filter(Boolean);
     const collabSignals = [...new Set(recentPosts.flatMap(p => p.tagged))].slice(0, 8);
@@ -846,13 +687,8 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-// discoveryMode controls which hashtag strategy is used:
-//   'A' — intent-first groups: partner/collab language + adjacent categories
-//   'B' — category-first groups: credential/geo/treatment (original strategy)
-// classifyTrack() still runs on every enriched profile regardless of mode —
-// a Track B discovery run can still surface Track A prospects if their content warrants it.
-export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Promise<{
-  found: number; skipped: number; refusalReason?: string; discoveryMode: 'A' | 'B';
+export async function runScout(pool: Pool): Promise<{
+  found: number; skipped: number; refusalReason?: string;
 }> {
   const today = new Date().toISOString().split('T')[0];
 
@@ -868,19 +704,17 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
       const reason = `Gap check: ${Math.round(gapMin)}m ago (min ${MIN_GAP_MINUTES}m)`;
       console.log(`[scout] Refused: ${reason}`);
       await pool.query(`UPDATE scout_memory SET refused_runs = refused_runs + 1, updated_at = NOW() WHERE date = $1`, [today]);
-      return { found: 0, skipped: 0, refusalReason: reason, discoveryMode };
+      return { found: 0, skipped: 0, refusalReason: reason };
     }
   }
 
   if (memory.daily_discovery_count >= DAILY_LIMIT) {
-    return { found: 0, skipped: 0, refusalReason: `Daily limit ${memory.daily_discovery_count}/${DAILY_LIMIT}`, discoveryMode };
+    return { found: 0, skipped: 0, refusalReason: `Daily limit ${memory.daily_discovery_count}/${DAILY_LIMIT}` };
   }
 
   await pool.query(`UPDATE scout_memory SET last_run = NOW(), updated_at = NOW() WHERE date = $1`, [today]);
 
-  // Track A uses keyword-based search (category × intent combos, user + hashtag search types).
-  // Track B uses hashtag page scraping (category/credential/geo anchored tags).
-  console.log(`[scout] Discovery mode: Track ${discoveryMode}`);
+  console.log(`[scout] Phase 1: starting discovery run`);
 
   const { rows: knownRows } = await pool.query<{ handle: string }>(`SELECT handle FROM prospects`);
   const knownHandles = new Set([
@@ -891,13 +725,9 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
 
   let phase1Candidates: Phase1Candidate[] = [];
   try {
-    if (discoveryMode === 'A') {
-      phase1Candidates = await getHandlesFromKeywords();
-    } else {
-      phase1Candidates = await getHandlesFromHashtags(TRACK_B_HASHTAG_GROUPS);
-    }
+    phase1Candidates = await getHandlesFromHashtags(HASHTAG_GROUPS);
   } catch (err) {
-    return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}`, discoveryMode };
+    return { found: 0, skipped: 0, refusalReason: `Phase 1 error: ${err}` };
   }
 
   // ── Phase 1.5: Pre-filter all candidates using available Phase 1 data ─────────
@@ -919,7 +749,7 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
   for (const r of rejected) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
   console.log(`[scout] Rejection reasons: ${Object.entries(reasons).map(([k,v]) => `${k}=${v}`).join(', ')}`);
 
-  if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length, discoveryMode };
+  if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length };
 
   // Shuffle passed candidates — get variety across runs
   // Then take up to MAX_PROFILE_LOOKUPS for Phase 2 enrichment
@@ -934,7 +764,7 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
   try {
     profiles = await enrichProfiles(toEnrich);
   } catch (err) {
-    return { found: 0, skipped: 0, refusalReason: `Phase 2 error: ${err}`, discoveryMode };
+    return { found: 0, skipped: 0, refusalReason: `Phase 2 error: ${err}` };
   }
 
   if (profiles.length > 0) {
@@ -972,9 +802,9 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
       continue;
     }
     // Must have posted recently — check if any post is within 30 days
-    const hasRecentPost = profile.recentPosts.some(p => p.daysAgo <= 30);
+    const hasRecentPost = profile.recentPosts.some(p => p.daysAgo <= 60);
     if (!hasRecentPost && profile.recentPosts.length > 0) {
-      console.log(`[scout] Skip @${profile.username}: no posts in last 30 days`);
+      console.log(`[scout] Skip @${profile.username}: no posts in last 60 days`);
       continue;
     }
 
@@ -1012,9 +842,7 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
     `, [
       p.username, sanitize(p.displayName), sanitize(p.biography),
       p.followersCount, p.followsCount, p.postsCount,
-      discoveryMode === 'A'
-        ? `track_A: keyword search (${HASHTAG_SEARCH_TERMS.slice(0,2).join(', ')}...)`
-        : `track_B: ${TRACK_B_HASHTAG_GROUPS.flat().slice(0,3).join(', ')}`,
+      `scout: ${HASHTAG_GROUPS.flat().slice(0,3).join(', ')}`,
       p.hasBookingLink, p.usesStories,
       JSON.stringify(p.recentCaptions),
       JSON.stringify(p.collabSignals),
@@ -1027,8 +855,8 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
       inserted++;
       insertedHandles.push(p.username);
       await pool.query(`INSERT INTO activity_log (source, action, detail) VALUES ('scout','discovered',$1)`,
-        [`@${p.username} Track ${p.track} (scout mode: ${discoveryMode}) — ${p.followersCount} followers`]);
-      console.log(`[scout] Added @${p.username} Track ${p.track} (scout mode: ${discoveryMode})`);
+        [`@${p.username} Track ${p.track} — ${p.followersCount} followers`]);
+      console.log(`[scout] Added @${p.username} Track ${p.track}`);
     }
   }
 
@@ -1041,8 +869,8 @@ export async function runScout(pool: Pool, discoveryMode: 'A' | 'B' = 'B'): Prom
     WHERE date = $3
   `, [inserted, JSON.stringify(insertedHandles), today]);
 
-  console.log(`[scout] Done (mode: Track ${discoveryMode}): ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${toEnrich.length} to enrich / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
-  return { found: inserted, skipped: profiles.length - inserted, discoveryMode };
+  console.log(`[scout] Done: ${inserted} added / ${qualified.length} qualified / ${profiles.length} enriched / ${toEnrich.length} to enrich / ${passed.length} pre-filter passed / ${phase1Candidates.length} raw`);
+  return { found: inserted, skipped: profiles.length - inserted };
 }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
