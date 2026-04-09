@@ -699,7 +699,7 @@ async function enrichProfiles(handles: string[]): Promise<EnrichedProfile[]> {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export async function runScout(pool: Pool): Promise<{
+export async function runScout(pool: Pool, _discoveryMode?: 'A' | 'B'): Promise<{
   found: number; skipped: number; refusalReason?: string;
 }> {
   const today = new Date().toISOString().split('T')[0];
