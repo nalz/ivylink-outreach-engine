@@ -79,17 +79,21 @@ const CATEGORY_CONFIG: Record<IcpCategory, CategoryConfig> = {
   salon: {
     label: 'Salon / Lash / Brow / Nail Studio',
     hashtagGroups: [
-      ['#salonowner','#hairsalonowner','#lashliftowner','#browsalonowner',
-       '#nailsalonowner','#beautysuiteowner','#independentstylist',
-       '#boothrentlife','#suitesalon','#myownboss','#womenwhobuild'],
+      // TIER 1: Hard owner-identity — only actual owners use these tags
+      ['#salonowner','#hairsalonowner','#nailsalonowner','#lashliftowner',
+       '#browsalonowner','#beautysuiteowner','#boothrentlife','#suitesalonowner',
+       '#independentsalonowner','#beautyentrepreneur','#hairboss','#nailboss'],
+      // TIER 2: NJ/NYC city + credential combos — local licensed providers
       ['#njhairstylist','#nychairstylist','#njlashartist','#nyclashartist',
-       '#njbrowartist','#nycbrowartist','#njnails','#nycnails',
-       '#njsalon','#nycsalon','#hobokenhairstylist','#jerseycitystylist'],
+       '#njnailtech','#nycnailtech','#njbrowartist','#nycbrowartist',
+       '#hobokensalon','#jerseycitysalon','#montclairsalon','#summitsalon'],
+      // TIER 3: Local service + geo — filters to NJ/NYC geography
       ['#njlashes','#nyclashes','#njbrows','#nycbrows',
-       '#njkeratintreatment','#njhairextensions','#nychairextensions',
-       '#njbalayage','#nycbalayage','#njhaircolor','#njblowout'],
-      ['#lashliftandtint','#laminatedbrows','#microblading','#powderbrows',
-       '#gelxnails','#nailart','#newjerseysalon','#njbeauty','#nycbeauty'],
+       '#njnails','#nycnails','#njbalayage','#nycbalayage',
+       '#njhaircolor','#njmicroblading','#nycmicroblading','#njpowderbrows'],
+      // TIER 4: Broad service — most likely to include non-owners, filtered hardest
+      ['#newjerseysalon','#njsalon','#njbeauty','#nycbeauty',
+       '#njhairextensions','#njkeratintreatment','#gelxnails','#lashliftandtint'],
     ],
     icpKeywords: [
       'salon','hair salon','lash','lashes','brow','brows','nail','nails',
@@ -114,17 +118,22 @@ const CATEGORY_CONFIG: Record<IcpCategory, CategoryConfig> = {
   fitness: {
     label: 'Gym / Yoga / Pilates Studio',
     hashtagGroups: [
+      // TIER 1: Hard owner-identity — studio founders and gym owners
       ['#gymowner','#yogastudioowner','#pilatesstudioowner','#fitnessstudioowner',
-       '#boutiquefitness','#independenttrainer','#mygym','#mystudio',
-       '#smallbizowner','#womenwhobuild'],
-      ['#njpilates','#nycpilates','#njyoga','#nycyoga','#njpersonaltrainer',
-       '#nycpersonaltrainer','#njfitness','#nycfitness',
-       '#njgym','#nycgym','#hobokenfitness','#jerseycityfitness'],
-      ['#reformerpilates','#njreformerpilates','#nycreformerpilates',
-       '#njbarre','#nycbarre','#njbootcamp','#nycbootcamp',
-       '#njcrossfit','#nyccrossfit','#njyogainstructor','#nycyogainstructor'],
-      ['#pilateslife','#yogalife','#personaltraining','#strengthandconditioning',
-       '#functionalfitness','#newjerseyfitness','#nyfitness','#njwellness'],
+       '#boutiquefitness','#boutiquefitnessowner','#studiooowner',
+       '#fitnessfounder','#fitnesspreneur','#fitbosslife','#independenttrainer'],
+      // TIER 2: NJ/NYC city + modality — local studio operators
+      ['#njpilates','#nycpilates','#njyoga','#nycyoga',
+       '#njpersonaltrainer','#nycpersonaltrainer',
+       '#hobokenfitness','#jerseycityfitness','#montclairfitness',
+       '#njreformerpilates','#nycreformerpilates'],
+      // TIER 3: Specific modality + geo
+      ['#njbarre','#nycbarre','#njbootcamp','#nycbootcamp',
+       '#njcrossfit','#nyccrossfit','#njyogainstructor','#nycyogainstructor',
+       '#njtriathlete','#njruncoach','#njstrengthcoach'],
+      // TIER 4: Broad — filtered hardest, catches overflow
+      ['#newjerseyfitness','#njfitness','#nycfitness','#njwellness',
+       '#personaltraining','#pilateslife','#yogalife','#strengthandconditioning'],
     ],
     icpKeywords: [
       'gym','yoga','pilates','fitness','studio','workout','training',
@@ -205,10 +214,20 @@ function looksLikePersonName(displayName: string): boolean {
   if (PERSON_CREDENTIALS.some(c => new RegExp(c, 'i').test(displayName))) return true;
   if (/^(dr\.?\s|nurse\s|injector\s)/i.test(displayName.trim())) return true;
 
+  // "Hair by Jessica", "Nails by Kim", "Yoga by Sarah", "Training by Mike"
+  // — "by [Name]" is almost always a solo owner branding under their own name
+  if (/\bby\s+[A-Z][a-z]+/i.test(displayName)) return true;
+
+  // "Lashes with Jessica", "Yoga with Sarah" — same pattern
+  if (/\bwith\s+[A-Z][a-z]+/i.test(displayName)) return true;
+
+  // "Jessica's Salon", "Kim's Studio", "Sarah's Gym" — possessive = owner
+  if (/[A-Za-z]+'s\s/i.test(displayName)) return true;
+
   const bizCount = BIZ_WORDS_IN_NAME.filter(w => nameLower.includes(w)).length;
   if (bizCount >= 2) return false;
+  // 1 business word + personal separator ("Sarah | Aesthetics", "Kim · Salon")
   if (bizCount === 1 && /[|·•—]/.test(displayName)) return true;
-  if (/'s\s/i.test(displayName)) return true;
 
   const words = displayName.trim().split(/\s+/);
   if (words.length === 1 && bizCount === 0) return false;
@@ -239,7 +258,9 @@ function isOwner(
 ): { qualified: boolean; reason: string } {
   if (account.isPrivate) return { qualified: false, reason: 'private' };
   if (PERMANENT_EXCLUSIONS.has(account.username)) return { qualified: false, reason: 'exclusion list' };
-  if (account.followersCount < 400 || account.followersCount > 150_000) {
+  // Follower floor is lower for salon/fitness — solo operators often have smaller audiences
+  const minFollowers = (cfg.label.includes('Med Spa')) ? 400 : 300;
+  if (account.followersCount < minFollowers || account.followersCount > 150_000) {
     return { qualified: false, reason: `followers ${account.followersCount}` };
   }
 
@@ -396,7 +417,7 @@ async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1
       startRun({
         directUrls: hashtags.map(h => `https://www.instagram.com/explore/tags/${h.replace('#','')}/`),
         resultsType: 'posts',
-        resultsLimit: 50,
+        resultsLimit: 25,  // 25 posts per group × 4 groups = up to 100 candidates; plenty for pre-filter
       }).catch(err => { console.error('[scout] Run start error:', err); return null; })
     )
   );
@@ -449,7 +470,8 @@ function preFilter(
   if (candidate.isPrivate) return { pass: false, reason: 'private' };
 
   if (candidate.followersCount > 0) {
-    if (candidate.followersCount < 400 || candidate.followersCount > 150_000) {
+    const minFollowers = (cfg.label.includes('Med Spa')) ? 400 : 300;
+    if (candidate.followersCount < minFollowers || candidate.followersCount > 150_000) {
       return { pass: false, reason: `followers ${candidate.followersCount}` };
     }
   }
@@ -715,8 +737,17 @@ export async function runScout(
 
   if (passed.length === 0) return { found: 0, skipped: phase1Candidates.length };
 
-  const toEnrich = passed.map(r => r.candidate.username);
-  console.log(`[scout] Phase 2: enriching all ${toEnrich.length} pre-filtered profiles`);
+  // Cap Phase 2 enrichment — this is the expensive Apify call (full profile + posts).
+  // 30 accounts per run keeps cost under ~$0.50 while still yielding 5-15 qualified prospects.
+  // Shuffle so we get variety across runs rather than always taking the same top accounts.
+  const MAX_ENRICH = 30;
+  const toEnrich = passed
+    .map(r => r.candidate.username)
+    .sort(() => Math.random() - 0.5)
+    .slice(0, MAX_ENRICH);
+
+  const skippedByBudget = Math.max(0, passed.length - MAX_ENRICH);
+  console.log(`[scout] Phase 2: enriching ${toEnrich.length} of ${passed.length} pre-filtered profiles (${skippedByBudget} deferred to next run)`);
 
   let profiles: EnrichedProfile[] = [];
   try {
