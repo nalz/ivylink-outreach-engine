@@ -258,59 +258,61 @@ function isOwner(
 ): { qualified: boolean; reason: string } {
   if (account.isPrivate) return { qualified: false, reason: 'private' };
   if (PERMANENT_EXCLUSIONS.has(account.username)) return { qualified: false, reason: 'exclusion list' };
-  // Follower floor is lower for salon/fitness — solo operators often have smaller audiences
-  const minFollowers = (cfg.label.includes('Med Spa')) ? 400 : 300;
-  if (account.followersCount < minFollowers || account.followersCount > 150_000) {
-    return { qualified: false, reason: `followers ${account.followersCount}` };
-  }
 
-  if (account.displayName && !looksLikePersonName(account.displayName)) {
-    const bioLower = (account.biography ?? '').toLowerCase();
-    const hasFirstPerson = UNIVERSAL_FIRST_PERSON.some(s => bioLower.includes(s))
-      || bioLower.includes('founder') || bioLower.includes('established');
-    if (!hasFirstPerson) {
-      return { qualified: false, reason: 'business page — no personal identity in name or bio' };
-    }
+  // Follower range — primary quality signal
+  const minFollowers = cfg.label.includes('Med Spa') ? 400 : 200;
+  if (account.followersCount < minFollowers || account.followersCount > 200_000) {
+    return { qualified: false, reason: `followers ${account.followersCount}` };
   }
 
   const bio = (account.biography ?? '').toLowerCase();
   const name = (account.displayName ?? '').toLowerCase();
 
-  if (account.category && cfg.badCategories.some(c => account.category!.toLowerCase().includes(c))) {
-    return { qualified: false, reason: `category: ${account.category}` };
-  }
-
+  // Reject pure vendors/software/agencies — they're never outreach targets
   const vendorSignals = [
     'agency','software','saas','platform','app for','tool for',
     'marketing for','grow your','scale your','ai for',
-    'academy','course','coaching','consultant','distributor','supplier',
+    'academy','course','consultant','distributor','supplier',
     ...cfg.vendorSignalExtras,
   ];
   if (vendorSignals.some(v => bio.includes(v))) {
     return { qualified: false, reason: 'vendor/agency bio signal' };
   }
 
-  const hasIcp = cfg.icpKeywords.some(kw => bio.includes(kw) || name.includes(kw));
+  // Must be in the right category — check ICP keywords in bio OR display name OR handle
+  const handle = account.username.toLowerCase();
+  const categoryKey = cfg.label.includes('Med Spa') ? 'medspa'
+    : cfg.label.includes('Salon') ? 'salon' : 'fitness';
+  const icpTerms = ICP_HANDLE_TERMS[categoryKey];
+
+  const hasIcp = cfg.icpKeywords.some(kw => bio.includes(kw) || name.includes(kw))
+    || icpTerms.some(t => handle.includes(t) || name.includes(t));
   if (!hasIcp) return { qualified: false, reason: 'no ICP keyword' };
 
-  if (!isGeoMatch(account.biography, [])) {
-    return { qualified: false, reason: 'non NJ/NYC geography' };
-  }
-
-  for (const pattern of EMPLOYEE_PATTERNS) {
+  // Reject clear employees — "aesthetician @place", "stylist at @place"
+  // Only check patterns that require @ (i.e. employed at a specific named account)
+  const employeeAtPatterns = [
+    /aesthetician\s+@/i, /esthetician\s+@/i, /injector\s+@/i,
+    /stylist\s+at\s+@/i, /trainer\s+at\s+@/i, /instructor\s+at\s+@/i,
+    /working\s+at\s+@/i, /based\s+at\s+@/i,
+    /team\s+(member|of)\s+@/i, /proud\s+(member|part)\s+of\s+@/i,
+  ];
+  for (const pattern of employeeAtPatterns) {
     if (pattern.test(account.biography ?? '')) {
       return { qualified: false, reason: 'employee pattern' };
     }
   }
 
-  const hasOwner = cfg.ownerSignals.some(sig => bio.includes(sig))
-    || /^[A-Z][a-zA-Z\s]+(Med Spa|Medspa|Aesthetics|Clinic|Studio|Wellness|Salon|Gym)/i.test(account.displayName ?? '');
-
-  if (!hasOwner) {
-    const softPass = account.isBusinessAccount && account.followersCount > 800
-      && (account.category ?? '').toLowerCase().includes(cfg.softPassCategory)
-      && looksLikePersonName(account.displayName ?? '');
-    if (!softPass) return { qualified: false, reason: 'no ownership signal or pure business page' };
+  // NOTE: No geo requirement — analyst scores for geography.
+  // NOTE: No ownership signal requirement for salon/fitness — a nail tech with
+  // 500 followers posting their work IS the operator, whether or not they say "owner".
+  // Med spa still benefits from ownership check due to higher rate of employee accounts.
+  if (cfg.label.includes('Med Spa')) {
+    const hasOwner = cfg.ownerSignals.some(sig => bio.includes(sig))
+      || looksLikePersonName(account.displayName ?? '');
+    if (!hasOwner) {
+      return { qualified: false, reason: 'no ownership signal or pure business page' };
+    }
   }
 
   return { qualified: true, reason: 'passed' };
@@ -461,6 +463,22 @@ async function getHandlesFromHashtags(hashtagGroups: string[][]): Promise<Phase1
 
 // ── Phase 1.5: Pre-filter ─────────────────────────────────────────────────────
 
+// ── Vendor signals detectable from handle alone ───────────────────────────────
+const HANDLE_VENDOR_SIGNALS = [
+  'dropship','wholesale','supplier','distributor',
+  'bookkeeping','accounting','solutions','consulting',
+  'jointeam','recruit','software','saas',
+];
+
+// Short ICP terms — match against handle and display name when bio is empty
+const ICP_HANDLE_TERMS: Record<string, string[]> = {
+  medspa:  ['medspa','medispa','aesthetic','injector','botox','filler','laser','skincare','spa'],
+  salon:   ['hair','nail','lash','brow','salon','beauty','blowout','color','balayage',
+             'extension','microblad','stylist','colorist','cosmetolog'],
+  fitness: ['yoga','pilates','fitness','gym','trainer','crossfit','barre','reformer',
+             'bootcamp','wellness','strength','coach'],
+};
+
 function preFilter(
   candidate: Phase1Candidate,
   knownHandles: Set<string>,
@@ -469,48 +487,64 @@ function preFilter(
   if (knownHandles.has(candidate.username)) return { pass: false, reason: 'already known' };
   if (candidate.isPrivate) return { pass: false, reason: 'private' };
 
+  const handle = candidate.username.toLowerCase();
+
+  // Reject obvious vendor handles — detectable without any profile data
+  if (HANDLE_VENDOR_SIGNALS.some(v => handle.includes(v))) {
+    return { pass: false, reason: 'vendor handle' };
+  }
+
+  // Follower range — only filter when Apify actually returned the data
   if (candidate.followersCount > 0) {
-    const minFollowers = (cfg.label.includes('Med Spa')) ? 400 : 300;
-    if (candidate.followersCount < minFollowers || candidate.followersCount > 150_000) {
+    const minFollowers = cfg.label.includes('Med Spa') ? 400 : 200;
+    if (candidate.followersCount < minFollowers || candidate.followersCount > 200_000) {
       return { pass: false, reason: `followers ${candidate.followersCount}` };
     }
   }
 
-  if (candidate.biography.length > 0) {
-    const bio = candidate.biography.toLowerCase();
-    const name = candidate.displayName.toLowerCase();
+  // When bio is empty (always the case with hashtag scraping), require at least
+  // an ICP signal in the handle or display name to justify Phase 2 credits.
+  // We do NOT filter on geo — the analyst handles scoring for geography.
+  if (candidate.biography.length === 0) {
+    const displayLower = (candidate.displayName ?? '').toLowerCase();
+    // Normalize unicode bold/italic chars: "𝐧𝐚𝐢𝐥" → "nail"
+    const displayNorm = displayLower.normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x00-\x7F]/g, ' ');
+    const combined = `${handle} ${displayLower} ${displayNorm}`;
 
-    const vendorSignals = [
-      'agency','software','saas','platform','app for','tool for',
-      'marketing for','grow your','scale your','ai for',
-      'academy','course','coaching','consultant','distributor','supplier',
-      ...cfg.vendorSignalExtras,
-    ];
-    if (vendorSignals.some(v => bio.includes(v))) return { pass: false, reason: 'vendor/agency' };
+    const categoryKey = cfg.label.includes('Med Spa') ? 'medspa'
+      : cfg.label.includes('Salon') ? 'salon' : 'fitness';
+    const icpTerms = ICP_HANDLE_TERMS[categoryKey];
+    const hasIcp = icpTerms.some(t => combined.includes(t));
 
-    const hasIcp = cfg.icpKeywords.some(kw => bio.includes(kw) || name.includes(kw));
-    if (!hasIcp) return { pass: false, reason: 'no ICP keyword' };
-
-    if (!isGeoMatch(candidate.biography, [])) return { pass: false, reason: 'non NJ/NYC geography' };
-
-    for (const pattern of EMPLOYEE_PATTERNS) {
-      if (pattern.test(candidate.biography)) return { pass: false, reason: 'employee pattern' };
+    if (!hasIcp) {
+      return { pass: false, reason: 'no ICP signal in handle/display name' };
     }
+
+    return { pass: true, reason: `icp signal in handle/display` };
   }
 
-  if (candidate.displayName.length > 0 && !looksLikePersonName(candidate.displayName)) {
-    const bioLower = candidate.biography.toLowerCase();
-    const hasFirstPerson = UNIVERSAL_FIRST_PERSON.some(s => bioLower.includes(s))
-      || bioLower.includes('founder') || bioLower.includes('established');
-    if (!hasFirstPerson) {
-      return { pass: false, reason: `business page display name: "${candidate.displayName}"` };
-    }
+  // Bio is present — run standard checks
+  const bio = candidate.biography.toLowerCase();
+  const name = (candidate.displayName ?? '').toLowerCase();
+
+  const vendorSignals = [
+    'agency','software','saas','platform','app for','tool for',
+    'marketing for','grow your','scale your','ai for',
+    'academy','course','coaching','consultant','distributor','supplier',
+    ...cfg.vendorSignalExtras,
+  ];
+  if (vendorSignals.some(v => bio.includes(v))) return { pass: false, reason: 'vendor/agency' };
+
+  const hasIcp = cfg.icpKeywords.some(kw => bio.includes(kw) || name.includes(kw));
+  if (!hasIcp) return { pass: false, reason: 'no ICP keyword' };
+
+  for (const pattern of EMPLOYEE_PATTERNS) {
+    if (pattern.test(candidate.biography)) return { pass: false, reason: 'employee pattern' };
   }
 
-  return {
-    pass: true,
-    reason: candidate.biography.length === 0 ? 'soft pass (no bio in Phase 1)' : 'passed pre-filter',
-  };
+  return { pass: true, reason: 'passed pre-filter' };
 }
 
 // ── Phase 2: Batch profile enrichment ────────────────────────────────────────
